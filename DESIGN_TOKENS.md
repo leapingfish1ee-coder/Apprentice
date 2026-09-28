@@ -50,6 +50,8 @@
 | camera follow factor | `.18/frame` | 镜头追随 |
 | zoom follow factor | `.18/frame` | 滚轮缩放收敛 |
 | zoom range | `.72–1.65` | 地图镜头 |
+| static map cache | `2× base resolution` | 地形与静态物件只预渲染一次 |
+| Canvas DPR cap | `1.5` | 控制高 DPI backing-store 像素成本；DOM HUD 不受影响 |
 
 ## Vision
 
@@ -71,7 +73,8 @@
 | --- | --- | --- |
 | cells per tile | `8 × 8` logical grid | 像素块定位粒度，不整体铺满 |
 | blocks per tile | `9` | 稀疏不规则 glitch 块数量 |
-| spatial sampling | bilinear, 8×8 per tile | 主雾层在格内连续渐变 |
+| spatial sampling | bilinear → 8×8 low-res alpha mask | 主雾层在低分辨率纹理中连续采样 |
+| texture update | `30Hz` | 雾纹理低频更新；玩家/镜头仍保持 rAF |
 | alpha variance | `.045` | glitch 块静态差异 |
 | cell pulse amplitude | `.016` | 主雾层像素块的轻微呼吸 |
 | block pulse amplitude | `.028` | 稀疏 glitch 块的明灭幅度 |
@@ -79,7 +82,7 @@
 | geometry | fill only | 禁止描边 |
 | cell overlap | `.35px each side` | 消除网格缝/描边感 |
 
-主雾层通过相邻地块 fog alpha 的双线性采样在格内连续变化，再以 8×8 像素块量化呈现；因此整体是渐变，但纹理仍是 pixel/glitch。其上仅叠加少量不规则暗块。全程不使用 stroke、outline、可见格线或整格棋盘纹理。常态动画只改变 opacity，不移动块的位置，形成低频烟雾式呼吸。地图保留逻辑格子，但默认不绘制视觉格线。
+主雾层通过相邻地块 fog alpha 的双线性采样写入 `288×224` 低分辨率 alpha mask，再用 nearest-neighbor 放大到地图；因此整体仍是渐变的 pixel/glitch，而每帧只需要一次纹理合成，不再产生数千次 Canvas `fillRect`。稀疏暗块几何与常态 pulse 已预计算进 mask，30Hz 更新；玩家移动、镜头和输入仍保持 requestAnimationFrame。全程不使用 stroke、outline、可见格线或整格棋盘纹理。
 
 ## Reduced motion
 
@@ -106,3 +109,12 @@
 常驻 HUD 显示实时 FPS、窗口平均 FPS、P95 frame time 与平均 Canvas draw time。性能采样在主循环中进行，但 HUD DOM 每 250ms 才更新一次。
 
 GitHub Actions 只保留固定视口的视觉检查。性能不再使用 `dump-dom` 自动判定，因为 headless 生命周期不足以保证稳定采样窗口。正式评估使用页面内同一采样器连续运行约 8 秒，并让角色持续移动，覆盖镜头跟随、LOS 更新、视野过渡和 glitch fog 常态动画；结果记录在 `PERFORMANCE.md`。不同 headless / GPU 环境的绝对数值不可直接代表所有真实设备。
+
+
+## Rendering performance
+
+- 静态地形、树木、建筑与装饰预渲染到 `2×` 后台 Canvas；主循环只裁剪并缩放位图。
+- Fog 使用 `288×224` alpha texture；主循环每帧只做一次 fog 位图合成。
+- Fog phase、period、glitch block 几何和双线性采样坐标全部启动时预计算。
+- Fog texture 默认 30Hz；220ms 视野 transition 仍由 rAF 更新状态，因此输入与玩家运动不降帧。
+- 主 Canvas DPR 上限为 `1.5`，减少高 DPI 像素填充；HUD 为 DOM，不降低文字清晰度。

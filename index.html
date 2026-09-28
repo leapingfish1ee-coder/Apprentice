@@ -346,6 +346,8 @@ const perfCheck=query.has("perf-check");
 const MAP_W=36;
 const MAP_H=28;
 const BASE_TILE=40;
+const STATIC_CACHE_SCALE=2;
+const RENDER_DPR_MAX=1.5;
 const ZOOM_MIN=.72;
 const ZOOM_MAX=1.65;
 const MOVE_MS=reduceMotion.matches?0:115;
@@ -360,6 +362,9 @@ const FOG_PULSE_MAX_MS=6800;
 const FOG_CELL_PULSE_AMPLITUDE=.016;
 const FOG_BLOCK_PULSE_AMPLITUDE=.028;
 const FOG_GLITCH_VARIANCE=.045;
+const FOG_TEXTURE_INTERVAL_MS=1000/30;
+const FOG_TEX_W=MAP_W*FOG_GLITCH_CELLS;
+const FOG_TEX_H=MAP_H*FOG_GLITCH_CELLS;
 const PERF_UPDATE_MS=250;
 const PERF_SAMPLE_LIMIT=240;
 const PERF_SLOW_FRAME_MS=20;
@@ -443,6 +448,28 @@ const fogTarget=Array.from({length:MAP_H},()=>Array(MAP_W).fill(1));
 const OPAQUE_TILES=new Set(["tree","stone","house","shrine"]);
 let fogTransitionStart=performance.now();
 let fogTransitionDuration=0;
+let fogTextureLastUpdate=-Infinity;
+let fogTextureDirty=true;
+
+const staticMapCanvas=document.createElement("canvas");
+staticMapCanvas.width=MAP_W*BASE_TILE*STATIC_CACHE_SCALE;
+staticMapCanvas.height=MAP_H*BASE_TILE*STATIC_CACHE_SCALE;
+const staticMapCtx=staticMapCanvas.getContext("2d");
+
+const fogTextureCanvas=document.createElement("canvas");
+fogTextureCanvas.width=FOG_TEX_W;
+fogTextureCanvas.height=FOG_TEX_H;
+const fogTextureCtx=fogTextureCanvas.getContext("2d");
+const fogTextureImage=fogTextureCtx.createImageData(FOG_TEX_W,FOG_TEX_H);
+const fogPulsePhase=new Float32Array(FOG_TEX_W*FOG_TEX_H);
+const fogPulseSpeed=new Float32Array(FOG_TEX_W*FOG_TEX_H);
+const fogBlockBias=new Float32Array(FOG_TEX_W*FOG_TEX_H);
+const fogSampleX0=new Uint16Array(FOG_TEX_W);
+const fogSampleX1=new Uint16Array(FOG_TEX_W);
+const fogSampleTX=new Float32Array(FOG_TEX_W);
+const fogSampleY0=new Uint16Array(FOG_TEX_H);
+const fogSampleY1=new Uint16Array(FOG_TEX_H);
+const fogSampleTY=new Float32Array(FOG_TEX_H);
 
 const camera={x:player.x+.5,y:player.y+.5};
 let zoom=1;
@@ -451,7 +478,7 @@ let inspectTile={x:player.x,y:player.y};
 let zoomTimer=0;
 let cssWidth=innerWidth;
 let cssHeight=innerHeight;
-let dpr=Math.min(devicePixelRatio||1,2);
+let dpr=Math.min(devicePixelRatio||1,RENDER_DPR_MAX);
 
 const perfState={
   startedAt:performance.now(),
@@ -557,10 +584,65 @@ function hash(x,y,s=0){
   return ((n^(n>>16))>>>0)/4294967295;
 }
 
+function initializeFogTexturePattern(){
+  const tau=Math.PI*2;
+
+  for(let px=0;px<FOG_TEX_W;px++){
+    const worldX=px/FOG_GLITCH_CELLS+.5/FOG_GLITCH_CELLS;
+    const fx=clamp(worldX-.5,0,MAP_W-1);
+    const x0=Math.floor(fx);
+    fogSampleX0[px]=x0;
+    fogSampleX1[px]=Math.min(MAP_W-1,x0+1);
+    fogSampleTX[px]=fx-x0;
+  }
+
+  for(let py=0;py<FOG_TEX_H;py++){
+    const worldY=py/FOG_GLITCH_CELLS+.5/FOG_GLITCH_CELLS;
+    const fy=clamp(worldY-.5,0,MAP_H-1);
+    const y0=Math.floor(fy);
+    fogSampleY0[py]=y0;
+    fogSampleY1[py]=Math.min(MAP_H-1,y0+1);
+    fogSampleTY[py]=fy-y0;
+  }
+
+  for(let py=0;py<FOG_TEX_H;py++){
+    for(let px=0;px<FOG_TEX_W;px++){
+      const index=py*FOG_TEX_W+px;
+      fogPulsePhase[index]=hash(px,py,113)*tau;
+      const period=FOG_PULSE_MIN_MS+
+        hash(px,py,149)*(FOG_PULSE_MAX_MS-FOG_PULSE_MIN_MS);
+      fogPulseSpeed[index]=tau/period;
+    }
+  }
+
+  for(let y=0;y<MAP_H;y++){
+    for(let x=0;x<MAP_W;x++){
+      for(let block=0;block<FOG_GLITCH_BLOCKS;block++){
+        const seed=block*17+3;
+        const gx=Math.floor(hash(x,y,seed)*FOG_GLITCH_CELLS);
+        const gy=Math.floor(hash(x,y,seed+1)*FOG_GLITCH_CELLS);
+        const blockW=1+Math.floor(hash(x,y,seed+2)*3);
+        const blockH=1+Math.floor(hash(x,y,seed+3)*2);
+        const variance=(hash(x,y,seed+6)-.5)*FOG_GLITCH_VARIANCE;
+        const bias=clamp(.022+variance,0,.075);
+
+        for(let by=0;by<blockH&&gy+by<FOG_GLITCH_CELLS;by++){
+          for(let bx=0;bx<blockW&&gx+bx<FOG_GLITCH_CELLS;bx++){
+            const px=x*FOG_GLITCH_CELLS+gx+bx;
+            const py=y*FOG_GLITCH_CELLS+gy+by;
+            const index=py*FOG_TEX_W+px;
+            fogBlockBias[index]=Math.max(fogBlockBias[index],bias);
+          }
+        }
+      }
+    }
+  }
+}
+
 function resize(){
   cssWidth=innerWidth;
   cssHeight=innerHeight;
-  dpr=Math.min(devicePixelRatio||1,2);
+  dpr=Math.min(devicePixelRatio||1,RENDER_DPR_MAX);
   canvas.width=Math.round(cssWidth*dpr);
   canvas.height=Math.round(cssHeight*dpr);
   canvas.style.width=cssWidth+"px";
@@ -607,12 +689,7 @@ function hasLineOfSight(ox,oy,tx,ty){
 }
 
 function updateFogTransition(now=performance.now()){
-  if(fogTransitionDuration<=0){
-    for(let y=0;y<MAP_H;y++){
-      for(let x=0;x<MAP_W;x++)fogCurrent[y][x]=fogTarget[y][x];
-    }
-    return;
-  }
+  if(fogTransitionDuration<=0)return;
 
   const progress=clamp((now-fogTransitionStart)/fogTransitionDuration,0,1);
   const eased=easeVision(progress);
@@ -623,6 +700,7 @@ function updateFogTransition(now=performance.now()){
     }
   }
 
+  fogTextureDirty=true;
   if(progress>=1)fogTransitionDuration=0;
 }
 
@@ -669,8 +747,13 @@ function updateVision({animate=true}={}){
 
   fogTransitionStart=now;
   fogTransitionDuration=animate&&!reduceMotion.matches?FOG_TRANSITION_MS:0;
+  fogTextureDirty=true;
 
-  if(fogTransitionDuration===0)updateFogTransition(now);
+  if(fogTransitionDuration===0){
+    for(let y=0;y<MAP_H;y++){
+      for(let x=0;x<MAP_W;x++)fogCurrent[y][x]=fogTarget[y][x];
+    }
+  }
 }
 
 function isDiscovered(x,y){
@@ -692,249 +775,265 @@ function tileToScreen(x,y){
   };
 }
 
-function roundedRect(x,y,w,h,r){
+function roundedRect(x,y,w,h,r,target=ctx){
   const rr=Math.min(r,w/2,h/2);
-  ctx.beginPath();
-  ctx.moveTo(x+rr,y);
-  ctx.arcTo(x+w,y,x+w,y+h,rr);
-  ctx.arcTo(x+w,y+h,x,y+h,rr);
-  ctx.arcTo(x,y+h,x,y,rr);
-  ctx.arcTo(x,y,x+w,y,rr);
-  ctx.closePath();
+  target.beginPath();
+  target.moveTo(x+rr,y);
+  target.arcTo(x+w,y,x+w,y+h,rr);
+  target.arcTo(x+w,y+h,x,y+h,rr);
+  target.arcTo(x,y+h,x,y,rr);
+  target.arcTo(x,y,x+w,y,rr);
+  target.closePath();
 }
 
-function drawGroundTile(type,x,y,s){
+function drawGroundTile(type,x,y,s,target=ctx,tileX=0,tileY=0){
   if(type==="grass"||type==="flower"||type==="tree"||type==="stone"||type==="house"||type==="shrine"){
-    ctx.fillStyle="#9eae7a";
-    ctx.fillRect(x,y,s+1,s+1);
+    target.fillStyle="#9eae7a";
+    target.fillRect(x,y,s+1,s+1);
     for(let i=0;i<4;i++){
-      const px=x+hash(Math.floor(x/s),Math.floor(y/s),i)*s;
-      const py=y+hash(Math.floor(x/s),Math.floor(y/s),i+7)*s;
-      ctx.strokeStyle=i%2?"rgba(85,106,62,.20)":"rgba(228,225,177,.18)";
-      ctx.lineWidth=Math.max(.7,s*.018);
-      ctx.beginPath();
-      ctx.moveTo(px,py+2);ctx.lineTo(px+2,py-2);ctx.stroke();
+      const px=x+hash(tileX,tileY,i)*s;
+      const py=y+hash(tileX,tileY,i+7)*s;
+      target.strokeStyle=i%2?"rgba(85,106,62,.20)":"rgba(228,225,177,.18)";
+      target.lineWidth=Math.max(.7,s*.018);
+      target.beginPath();
+      target.moveTo(px,py+2);target.lineTo(px+2,py-2);target.stroke();
     }
   }
   if(type==="path"){
-    ctx.fillStyle="#b9a37b";
-    ctx.fillRect(x,y,s+1,s+1);
-    ctx.fillStyle="rgba(87,69,48,.12)";
+    target.fillStyle="#b9a37b";
+    target.fillRect(x,y,s+1,s+1);
+    target.fillStyle="rgba(87,69,48,.12)";
     for(let i=0;i<3;i++){
-      ctx.beginPath();
-      ctx.arc(x+hash(x,y,i)*s,y+hash(y,x,i+8)*s,Math.max(1,s*.025),0,Math.PI*2);
-      ctx.fill();
+      target.beginPath();
+      target.arc(
+        x+hash(tileX,tileY,i)*s,
+        y+hash(tileY,tileX,i+8)*s,
+        Math.max(1,s*.025),
+        0,
+        Math.PI*2
+      );
+      target.fill();
     }
   }
   if(type==="water"){
-    ctx.fillStyle="#719ca0";
-    ctx.fillRect(x,y,s+1,s+1);
-    ctx.strokeStyle="rgba(220,236,224,.32)";
-    ctx.lineWidth=Math.max(1,s*.025);
+    target.fillStyle="#719ca0";
+    target.fillRect(x,y,s+1,s+1);
+    target.strokeStyle="rgba(220,236,224,.32)";
+    target.lineWidth=Math.max(1,s*.025);
     for(let i=0;i<2;i++){
       const yy=y+s*(.32+i*.35);
-      ctx.beginPath();
-      ctx.moveTo(x+s*.12,yy);
-      ctx.quadraticCurveTo(x+s*.34,yy-s*.05,x+s*.56,yy);
-      ctx.quadraticCurveTo(x+s*.72,yy+s*.04,x+s*.9,yy-s*.01);
-      ctx.stroke();
+      target.beginPath();
+      target.moveTo(x+s*.12,yy);
+      target.quadraticCurveTo(x+s*.34,yy-s*.05,x+s*.56,yy);
+      target.quadraticCurveTo(x+s*.72,yy+s*.04,x+s*.9,yy-s*.01);
+      target.stroke();
     }
   }
   if(type==="bridge"){
-    ctx.fillStyle="#8c623f";
-    ctx.fillRect(x,y,s+1,s+1);
-    ctx.strokeStyle="rgba(47,28,17,.35)";
-    ctx.lineWidth=Math.max(1,s*.025);
+    target.fillStyle="#8c623f";
+    target.fillRect(x,y,s+1,s+1);
+    target.strokeStyle="rgba(47,28,17,.35)";
+    target.lineWidth=Math.max(1,s*.025);
     for(let i=1;i<5;i++){
       const xx=x+s*i/5;
-      ctx.beginPath();ctx.moveTo(xx,y);ctx.lineTo(xx,y+s);ctx.stroke();
+      target.beginPath();target.moveTo(xx,y);target.lineTo(xx,y+s);target.stroke();
     }
-    ctx.strokeStyle="rgba(235,192,132,.26)";
-    ctx.beginPath();ctx.moveTo(x,y+s*.18);ctx.lineTo(x+s,y+s*.18);ctx.stroke();
+    target.strokeStyle="rgba(235,192,132,.26)";
+    target.beginPath();target.moveTo(x,y+s*.18);target.lineTo(x+s,y+s*.18);target.stroke();
   }
 }
 
-function drawObject(type,x,y,s){
+function drawObject(type,x,y,s,target=ctx){
   if(type==="tree"){
-    ctx.fillStyle="rgba(43,43,26,.16)";
-    ctx.beginPath();ctx.ellipse(x+s*.53,y+s*.78,s*.26,s*.11,0,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#6e4e34";
-    ctx.fillRect(x+s*.45,y+s*.48,s*.12,s*.34);
-    ctx.fillStyle="#476847";
-    ctx.beginPath();ctx.arc(x+s*.50,y+s*.34,s*.29,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#5f8054";
-    ctx.beginPath();ctx.arc(x+s*.38,y+s*.28,s*.19,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#759264";
-    ctx.beginPath();ctx.arc(x+s*.59,y+s*.24,s*.18,0,Math.PI*2);ctx.fill();
+    target.fillStyle="rgba(43,43,26,.16)";
+    target.beginPath();target.ellipse(x+s*.53,y+s*.78,s*.26,s*.11,0,0,Math.PI*2);target.fill();
+    target.fillStyle="#6e4e34";
+    target.fillRect(x+s*.45,y+s*.48,s*.12,s*.34);
+    target.fillStyle="#476847";
+    target.beginPath();target.arc(x+s*.50,y+s*.34,s*.29,0,Math.PI*2);target.fill();
+    target.fillStyle="#5f8054";
+    target.beginPath();target.arc(x+s*.38,y+s*.28,s*.19,0,Math.PI*2);target.fill();
+    target.fillStyle="#759264";
+    target.beginPath();target.arc(x+s*.59,y+s*.24,s*.18,0,Math.PI*2);target.fill();
   }else if(type==="stone"){
-    ctx.fillStyle="rgba(54,48,41,.16)";
-    ctx.beginPath();ctx.ellipse(x+s*.53,y+s*.72,s*.25,s*.10,0,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#7f837c";
-    roundedRect(x+s*.25,y+s*.32,s*.50,s*.39,s*.09);ctx.fill();
-    ctx.fillStyle="rgba(230,231,213,.28)";
-    roundedRect(x+s*.31,y+s*.35,s*.31,s*.10,s*.04);ctx.fill();
+    target.fillStyle="rgba(54,48,41,.16)";
+    target.beginPath();target.ellipse(x+s*.53,y+s*.72,s*.25,s*.10,0,0,Math.PI*2);target.fill();
+    target.fillStyle="#7f837c";
+    roundedRect(x+s*.25,y+s*.32,s*.50,s*.39,s*.09,target);target.fill();
+    target.fillStyle="rgba(230,231,213,.28)";
+    roundedRect(x+s*.31,y+s*.35,s*.31,s*.10,s*.04,target);target.fill();
   }else if(type==="flower"){
     const colors=["#cfb378","#bd7e73","#e2d19a"];
     for(let i=0;i<4;i++){
-      ctx.fillStyle=colors[i%colors.length];
-      ctx.beginPath();
-      ctx.arc(x+s*(.28+.15*i),y+s*(.45+(i%2)*.13),Math.max(1.2,s*.035),0,Math.PI*2);
-      ctx.fill();
+      target.fillStyle=colors[i%colors.length];
+      target.beginPath();
+      target.arc(x+s*(.28+.15*i),y+s*(.45+(i%2)*.13),Math.max(1.2,s*.035),0,Math.PI*2);
+      target.fill();
     }
   }else if(type==="house"){
-    ctx.fillStyle="rgba(43,35,27,.14)";
-    ctx.fillRect(x+s*.15,y+s*.78,s*.72,s*.08);
-    ctx.fillStyle="#ded1b2";
-    ctx.fillRect(x+s*.17,y+s*.36,s*.66,s*.46);
-    ctx.fillStyle="#4d4a43";
-    ctx.beginPath();
-    ctx.moveTo(x+s*.08,y+s*.39);
-    ctx.lineTo(x+s*.5,y+s*.15);
-    ctx.lineTo(x+s*.92,y+s*.39);
-    ctx.lineTo(x+s*.84,y+s*.47);
-    ctx.lineTo(x+s*.16,y+s*.47);
-    ctx.closePath();ctx.fill();
-    ctx.fillStyle="#76523a";
-    ctx.fillRect(x+s*.44,y+s*.56,s*.16,s*.26);
+    target.fillStyle="rgba(43,35,27,.14)";
+    target.fillRect(x+s*.15,y+s*.78,s*.72,s*.08);
+    target.fillStyle="#ded1b2";
+    target.fillRect(x+s*.17,y+s*.36,s*.66,s*.46);
+    target.fillStyle="#4d4a43";
+    target.beginPath();
+    target.moveTo(x+s*.08,y+s*.39);
+    target.lineTo(x+s*.5,y+s*.15);
+    target.lineTo(x+s*.92,y+s*.39);
+    target.lineTo(x+s*.84,y+s*.47);
+    target.lineTo(x+s*.16,y+s*.47);
+    target.closePath();target.fill();
+    target.fillStyle="#76523a";
+    target.fillRect(x+s*.44,y+s*.56,s*.16,s*.26);
   }else if(type==="shrine"){
-    ctx.fillStyle="#8e4e3d";
-    ctx.fillRect(x+s*.28,y+s*.32,s*.09,s*.5);
-    ctx.fillRect(x+s*.63,y+s*.32,s*.09,s*.5);
-    ctx.fillRect(x+s*.18,y+s*.27,s*.64,s*.09);
-    ctx.fillRect(x+s*.24,y+s*.18,s*.52,s*.07);
-    ctx.fillStyle="#503b2f";
-    ctx.fillRect(x+s*.24,y+s*.82,s*.52,s*.06);
+    target.fillStyle="#8e4e3d";
+    target.fillRect(x+s*.28,y+s*.32,s*.09,s*.5);
+    target.fillRect(x+s*.63,y+s*.32,s*.09,s*.5);
+    target.fillRect(x+s*.18,y+s*.27,s*.64,s*.09);
+    target.fillRect(x+s*.24,y+s*.18,s*.52,s*.07);
+    target.fillStyle="#503b2f";
+    target.fillRect(x+s*.24,y+s*.82,s*.52,s*.06);
   }
+}
+
+function buildStaticMapCache(){
+  const s=BASE_TILE*STATIC_CACHE_SCALE;
+  staticMapCtx.clearRect(0,0,staticMapCanvas.width,staticMapCanvas.height);
+
+  for(let y=0;y<MAP_H;y++){
+    for(let x=0;x<MAP_W;x++){
+      drawGroundTile(tileAt(x,y),x*s,y*s,s,staticMapCtx,x,y);
+    }
+  }
+
+  for(let y=0;y<MAP_H;y++){
+    for(let x=0;x<MAP_W;x++){
+      const type=tileAt(x,y);
+      if(type==="tree"||type==="stone"||type==="flower"||type==="house"||type==="shrine"){
+        drawObject(type,x*s,y*s,s,staticMapCtx);
+      }
+    }
+  }
+}
+
+function visibleWorldRect(s){
+  const left=camera.x-cssWidth/(2*s);
+  const top=camera.y-cssHeight/(2*s);
+  const right=camera.x+cssWidth/(2*s);
+  const bottom=camera.y+cssHeight/(2*s);
+
+  return {
+    left,
+    top,
+    clampedLeft:clamp(left,0,MAP_W),
+    clampedTop:clamp(top,0,MAP_H),
+    clampedRight:clamp(right,0,MAP_W),
+    clampedBottom:clamp(bottom,0,MAP_H)
+  };
+}
+
+function drawStaticMap(s,view){
+  const sourceTileSize=BASE_TILE*STATIC_CACHE_SCALE;
+  const worldW=view.clampedRight-view.clampedLeft;
+  const worldH=view.clampedBottom-view.clampedTop;
+  if(worldW<=0||worldH<=0)return;
+
+  ctx.drawImage(
+    staticMapCanvas,
+    view.clampedLeft*sourceTileSize,
+    view.clampedTop*sourceTileSize,
+    worldW*sourceTileSize,
+    worldH*sourceTileSize,
+    (view.clampedLeft-view.left)*s,
+    (view.clampedTop-view.top)*s,
+    worldW*s,
+    worldH*s
+  );
+}
+
+function updateFogTexture(now,force=false){
+  if(!force&&now-fogTextureLastUpdate<FOG_TEXTURE_INTERVAL_MS)return;
+  if(reduceMotion.matches&&!fogTextureDirty&&!force)return;
+
+  fogTextureLastUpdate=now;
+  const pixels=fogTextureImage.data;
+
+  for(let py=0;py<FOG_TEX_H;py++){
+    const y0=fogSampleY0[py];
+    const y1=fogSampleY1[py];
+    const ty=fogSampleTY[py];
+    const tileY=Math.floor(py/FOG_GLITCH_CELLS);
+
+    for(let px=0;px<FOG_TEX_W;px++){
+      const index=py*FOG_TEX_W+px;
+      const dataIndex=index*4+3;
+      const tileX=Math.floor(px/FOG_GLITCH_CELLS);
+      const tileAlpha=fogCurrent[tileY][tileX];
+
+      let alpha;
+      if(!discovered[tileY][tileX]&&tileAlpha>=.995){
+        alpha=1;
+      }else{
+        const x0=fogSampleX0[px];
+        const x1=fogSampleX1[px];
+        const tx=fogSampleTX[px];
+        const top=fogCurrent[y0][x0]+(fogCurrent[y0][x1]-fogCurrent[y0][x0])*tx;
+        const bottom=fogCurrent[y1][x0]+(fogCurrent[y1][x1]-fogCurrent[y1][x0])*tx;
+        alpha=top+(bottom-top)*ty;
+
+        if(!reduceMotion.matches&&alpha>.01&&alpha<.98){
+          alpha+=Math.sin(now*fogPulseSpeed[index]+fogPulsePhase[index])*FOG_CELL_PULSE_AMPLITUDE;
+        }
+
+        if(tileAlpha>.01&&tileAlpha<.985&&fogBlockBias[index]>0){
+          const pulse=reduceMotion.matches
+            ?0
+            :Math.sin(now*fogPulseSpeed[index]*.82+fogPulsePhase[index]*1.37)*FOG_BLOCK_PULSE_AMPLITUDE;
+          const blockAlpha=clamp(fogBlockBias[index]+pulse,0,.075);
+          alpha=alpha+(1-alpha)*blockAlpha;
+        }
+      }
+
+      pixels[dataIndex]=Math.round(clamp(alpha,0,1)*255);
+    }
+  }
+
+  fogTextureCtx.putImageData(fogTextureImage,0,0);
+  fogTextureDirty=false;
+}
+
+function drawFogTexture(s,view){
+  const worldW=view.clampedRight-view.clampedLeft;
+  const worldH=view.clampedBottom-view.clampedTop;
+  if(worldW<=0||worldH<=0)return;
+
+  ctx.save();
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(
+    fogTextureCanvas,
+    view.clampedLeft*FOG_GLITCH_CELLS,
+    view.clampedTop*FOG_GLITCH_CELLS,
+    worldW*FOG_GLITCH_CELLS,
+    worldH*FOG_GLITCH_CELLS,
+    (view.clampedLeft-view.left)*s,
+    (view.clampedTop-view.top)*s,
+    worldW*s,
+    worldH*s
+  );
+  ctx.restore();
 }
 
 function drawMap(now){
   const s=BASE_TILE*zoom;
-  const minX=Math.max(0,Math.floor(camera.x-cssWidth/(2*s))-2);
-  const maxX=Math.min(MAP_W-1,Math.ceil(camera.x+cssWidth/(2*s))+2);
-  const minY=Math.max(0,Math.floor(camera.y-cssHeight/(2*s))-2);
-  const maxY=Math.min(MAP_H-1,Math.ceil(camera.y+cssHeight/(2*s))+2);
+  const view=visibleWorldRect(s);
 
   ctx.fillStyle="#f2efe6";
   ctx.fillRect(0,0,cssWidth,cssHeight);
-
-  for(let y=minY;y<=maxY;y++){
-    for(let x=minX;x<=maxX;x++){
-      const p=tileToScreen(x,y);
-      const type=tileAt(x,y);
-      drawGroundTile(type,p.x,p.y,s);
-    }
-  }
-
-  for(let y=minY;y<=maxY;y++){
-    for(let x=minX;x<=maxX;x++){
-      const type=tileAt(x,y);
-      if(["tree","stone","flower","house","shrine"].includes(type)){
-        const p=tileToScreen(x,y);
-        drawObject(type,p.x,p.y,s);
-      }
-    }
-  }
-
+  drawStaticMap(s,view);
   drawInspect(s);
   drawPlayer(s);
-  drawFog(s,minX,maxX,minY,maxY,now);
-}
-
-function sampleFog(worldX,worldY){
-  const fx=clamp(worldX-.5,0,MAP_W-1);
-  const fy=clamp(worldY-.5,0,MAP_H-1);
-  const x0=Math.floor(fx);
-  const y0=Math.floor(fy);
-  const x1=Math.min(MAP_W-1,x0+1);
-  const y1=Math.min(MAP_H-1,y0+1);
-  const tx=fx-x0;
-  const ty=fy-y0;
-
-  const top=fogCurrent[y0][x0]+(fogCurrent[y0][x1]-fogCurrent[y0][x0])*tx;
-  const bottom=fogCurrent[y1][x0]+(fogCurrent[y1][x1]-fogCurrent[y1][x0])*tx;
-  return top+(bottom-top)*ty;
-}
-
-function drawFog(s,minX,maxX,minY,maxY,now){
-  ctx.save();
-
-  for(let y=minY;y<=maxY;y++){
-    for(let x=minX;x<=maxX;x++){
-      const p=tileToScreen(x,y);
-      const alpha=fogCurrent[y][x];
-
-      if(alpha<=.004)continue;
-
-      if(!discovered[y][x]&&alpha>=.995){
-        ctx.fillStyle="#000";
-        ctx.fillRect(Math.floor(p.x),Math.floor(p.y),Math.ceil(s)+1,Math.ceil(s)+1);
-        continue;
-      }
-
-      const cells=FOG_GLITCH_CELLS;
-      const cell=s/cells;
-
-      for(let gy=0;gy<cells;gy++){
-        for(let gx=0;gx<cells;gx++){
-          const worldX=x+(gx+.5)/cells;
-          const worldY=y+(gy+.5)/cells;
-          let cellAlpha=sampleFog(worldX,worldY);
-
-          const idX=x*cells+gx;
-          const idY=y*cells+gy;
-          const phase=hash(idX,idY,113)*Math.PI*2;
-          const period=FOG_PULSE_MIN_MS+
-            hash(idX,idY,149)*(FOG_PULSE_MAX_MS-FOG_PULSE_MIN_MS);
-
-          if(!reduceMotion.matches&&cellAlpha>.01&&cellAlpha<.98){
-            cellAlpha+=Math.sin((now/period)*Math.PI*2+phase)*FOG_CELL_PULSE_AMPLITUDE;
-          }
-
-          cellAlpha=clamp(cellAlpha,0,1);
-          if(cellAlpha<=.004)continue;
-
-          ctx.fillStyle=`rgba(0,0,0,${cellAlpha})`;
-          ctx.fillRect(
-            p.x+gx*cell-.45,
-            p.y+gy*cell-.45,
-            cell+.9,
-            cell+.9
-          );
-        }
-      }
-
-      const edgeActive=alpha>.01&&alpha<.985;
-      if(!edgeActive)continue;
-
-      for(let block=0;block<FOG_GLITCH_BLOCKS;block++){
-        const seed=block*17+3;
-        const gx=Math.floor(hash(x,y,seed)*cells);
-        const gy=Math.floor(hash(x,y,seed+1)*cells);
-        const blockW=1+Math.floor(hash(x,y,seed+2)*3);
-        const blockH=1+Math.floor(hash(x,y,seed+3)*2);
-        const phase=hash(x,y,seed+4)*Math.PI*2;
-        const period=FOG_PULSE_MIN_MS+
-          hash(x,y,seed+5)*(FOG_PULSE_MAX_MS-FOG_PULSE_MIN_MS);
-        const pulse=reduceMotion.matches
-          ?0
-          :Math.sin((now/period)*Math.PI*2+phase)*FOG_BLOCK_PULSE_AMPLITUDE;
-        const variance=(hash(x,y,seed+6)-.5)*FOG_GLITCH_VARIANCE;
-        const blockAlpha=clamp(.022+variance+pulse,0,.075);
-
-        if(blockAlpha<=.003)continue;
-
-        ctx.fillStyle=`rgba(0,0,0,${blockAlpha})`;
-        ctx.fillRect(
-          p.x+gx*cell-.6,
-          p.y+gy*cell-.6,
-          Math.min(cells-gx,blockW)*cell+1.2,
-          Math.min(cells-gy,blockH)*cell+1.2
-        );
-      }
-    }
-  }
-
-  ctx.restore();
+  updateFogTexture(now);
+  drawFogTexture(s,view);
 }
 
 function drawInspect(s){
@@ -1197,7 +1296,10 @@ window.addEventListener("blur",hidePointer);
 window.addEventListener("pointerdown",wobblePointer);
 pointerShape.addEventListener("animationend",()=>pointerShape.classList.remove("is-wobbling"));
 
+initializeFogTexturePattern();
+buildStaticMapCache();
 updateVision({animate:true});
+updateFogTexture(performance.now(),true);
 
 if(visualCheck){
   pointer.style.display="block";

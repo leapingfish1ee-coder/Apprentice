@@ -26,6 +26,8 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .
+      - name: Allow Pages artifact propagation
+        run: sleep 5
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
@@ -62,4 +64,130 @@ jobs:
         with:
           name: visual-check-${{ github.sha }}
           path: visual-check.png
+          retention-days: 14
+
+
+  performance-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Measure dynamic rendering
+        run: |
+          python3 -m http.server 4174 >/tmp/apprentice-perf-http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID' EXIT
+          sleep 1
+
+          cat >/tmp/read-perf.mjs <<'NODE'
+          const port=Number(process.argv[2]);
+          const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+
+          let targets;
+          for(let attempt=0;attempt<50;attempt++){
+            try{
+              targets=await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+              if(targets.length)break;
+            }catch{}
+            await sleep(100);
+          }
+
+          const target=targets?.find(item=>item.type==="page");
+          if(!target)throw new Error("Chrome page target unavailable");
+
+          const socket=new WebSocket(target.webSocketDebuggerUrl);
+          await new Promise((resolve,reject)=>{
+            socket.addEventListener("open",resolve,{once:true});
+            socket.addEventListener("error",reject,{once:true});
+          });
+
+          let sequence=0;
+          const pending=new Map();
+          socket.addEventListener("message",event=>{
+            const message=JSON.parse(event.data);
+            const resolver=pending.get(message.id);
+            if(!resolver)return;
+            pending.delete(message.id);
+            resolver(message);
+          });
+
+          const send=(method,params={})=>new Promise(resolve=>{
+            const id=++sequence;
+            pending.set(id,resolve);
+            socket.send(JSON.stringify({id,method,params}));
+          });
+
+          await send("Runtime.enable");
+          await sleep(8000);
+          const response=await send("Runtime.evaluate",{
+            expression:"JSON.stringify(window.__APPRENTICE_PERF__)",
+            returnByValue:true
+          });
+          const value=response?.result?.result?.value;
+          if(!value)throw new Error("Performance summary unavailable");
+          process.stdout.write(value);
+          socket.close();
+          NODE
+
+          CHROME="${{ steps.chrome.outputs.chrome-path }}"
+
+          run_case() {
+            NAME="$1"
+            PORT="$2"
+            WINDOW="$3"
+            SCALE="$4"
+            PROFILE="/tmp/apprentice-${NAME}"
+
+            "$CHROME" \
+              --headless=new \
+              --disable-gpu \
+              --no-sandbox \
+              --hide-scrollbars \
+              --disable-background-timer-throttling \
+              --disable-renderer-backgrounding \
+              --disable-backgrounding-occluded-windows \
+              --remote-debugging-port="$PORT" \
+              --user-data-dir="$PROFILE" \
+              --window-size="$WINDOW" \
+              --force-device-scale-factor="$SCALE" \
+              "http://127.0.0.1:4174/?perf-check=1" \
+              >"/tmp/${NAME}.log" 2>&1 &
+            PID=$!
+
+            node /tmp/read-perf.mjs "$PORT" >"${NAME}.json"
+            kill "$PID" 2>/dev/null || true
+            wait "$PID" 2>/dev/null || true
+          }
+
+          run_case perf-800x500-dpr1 9222 800,500 1
+          run_case perf-1440x900-dpr1 9223 1440,900 1
+          run_case perf-1440x900-dpr2 9224 2880,1800 2
+
+          python3 - <<'PY'
+          import json
+          import os
+
+          names=[
+              "perf-800x500-dpr1",
+              "perf-1440x900-dpr1",
+              "perf-1440x900-dpr2",
+          ]
+          data={
+              "commit":os.environ.get("GITHUB_SHA"),
+              "cases":[json.load(open(f"{name}.json",encoding="utf-8")) for name in names],
+          }
+          with open("performance-check.json","w",encoding="utf-8") as output:
+              json.dump(data,output,ensure_ascii=False,indent=2)
+          print(json.dumps(data,ensure_ascii=False,indent=2))
+          PY
+
+      - name: Upload performance result
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-${{ github.sha }}
+          path: performance-check.json
           retention-days: 14
