@@ -1209,27 +1209,16 @@ if(visualCheck){
 
 if(perfCheck){
   let perfDirection=-1;
-
   setInterval(()=>{
     if(player.moving)return;
     if(player.y<=14)perfDirection=1;
     if(player.y>=18)perfDirection=-1;
     directionStep(0,perfDirection);
   },260);
-
-  setInterval(()=>{
-    const summary=performanceSummary(performance.now());
-    const payload=encodeURIComponent(JSON.stringify(summary));
-    fetch(`/__perf_report__?data=${payload}`,{
-      cache:"no-store",
-      keepalive:true
-    }).catch(()=>{});
-  },1000);
 }
 
 updateHud();
 requestAnimationFrame(tick);
 </script>
-<!-- benchmark-trigger -->
 </body>
 </html>
