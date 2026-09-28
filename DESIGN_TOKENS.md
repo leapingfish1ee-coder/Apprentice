@@ -105,4 +105,4 @@
 
 常驻 HUD 显示实时 FPS、窗口平均 FPS、P95 frame time 与平均 Canvas draw time。性能采样在主循环中进行，但 HUD DOM 每 250ms 才更新一次。
 
-GitHub Actions 的性能检查使用固定 `800×500` 窗口，让 headless Chrome 按真实墙钟持续运行 8 秒；角色在已知安全路径上持续移动，以覆盖玩家移动、镜头跟随、LOS 更新、视野过渡和 glitch fog 常态动画。页面每 1 秒主动上报滚动性能摘要，CI 取最后一份报告。CI 使用 headless Chrome 与软件渲染环境，其数值主要用于版本间回归比较，不代表所有真实设备的绝对性能。
+GitHub Actions 保留固定视口的视觉检查与性能 smoke snapshot；由于 headless `dump-dom` 的采样时长可能提前结束，该自动 JSON 只用于发现明显回归，不作为最终性能结论。需要正式评估时，使用同一页面采样器连续运行约 8 秒，并让角色持续移动，覆盖镜头跟随、LOS 更新、视野过渡和 glitch fog 常态动画。不同 headless / GPU 环境的绝对数值不可直接代表所有真实设备。
