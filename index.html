@@ -13,6 +13,12 @@
   --faint:#a69c8e;
   --line:rgba(61,55,47,.18);
   --paper:rgba(242,239,230,.88);
+  --ease-out:cubic-bezier(.23,1,.32,1);
+  --ease-in-out:cubic-bezier(.77,0,.175,1);
+  --motion-pointer-enter:70ms;
+  --motion-pointer-exit:50ms;
+  --motion-pointer-wobble:150ms;
+  --motion-zoom:120ms;
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
 }
 *{box-sizing:border-box}
@@ -115,7 +121,9 @@ body{
   letter-spacing:.08em;
   opacity:0;
   pointer-events:none;
-  transition:opacity 100ms ease-out,transform 120ms cubic-bezier(.23,1,.32,1);
+  transition:
+    opacity 100ms var(--ease-out),
+    transform var(--motion-zoom) var(--ease-out);
   transform:translateY(-3px);
 }
 .zoom-flash[data-visible="true"]{
@@ -133,12 +141,12 @@ body{
   opacity:0;
   transform:translate3d(-2.8px,-2.5px,0);
   will-change:transform,opacity;
-  transition:opacity 50ms cubic-bezier(.4,0,1,1);
+  transition:opacity var(--motion-pointer-exit) cubic-bezier(.4,0,1,1);
 }
 .pointer[data-visible="true"]{
   opacity:1;
-  transition-duration:70ms;
-  transition-timing-function:cubic-bezier(.23,1,.32,1);
+  transition-duration:var(--motion-pointer-enter);
+  transition-timing-function:var(--ease-out);
 }
 .pointer-shape{
   display:block;
@@ -148,7 +156,7 @@ body{
   will-change:transform;
 }
 .pointer-shape.is-wobbling{
-  animation:pointer-wobble 150ms cubic-bezier(.23,1,.32,1);
+  animation:pointer-wobble var(--motion-pointer-wobble) var(--ease-out);
 }
 @keyframes pointer-wobble{
   0%{transform:rotate(0deg)}
@@ -313,6 +321,11 @@ const VISION_CLEAR_RADIUS=4.25;
 const VISION_MAX_RADIUS=6.25;
 const FOG_SEEN_ALPHA=.64;
 const FOG_GLITCH_CELLS=8;
+const FOG_TRANSITION_MS=220;
+const FOG_PULSE_MIN_MS=3800;
+const FOG_PULSE_MAX_MS=6800;
+const FOG_PULSE_AMPLITUDE=.045;
+const FOG_GLITCH_VARIANCE=.11;
 
 const TILE_INFO={
   grass:{name:"草地",walkable:true},
@@ -387,7 +400,12 @@ const player={
 
 const discovered=Array.from({length:MAP_H},()=>Array(MAP_W).fill(false));
 const vision=Array.from({length:MAP_H},()=>Array(MAP_W).fill(0));
+const fogCurrent=Array.from({length:MAP_H},()=>Array(MAP_W).fill(1));
+const fogFrom=Array.from({length:MAP_H},()=>Array(MAP_W).fill(1));
+const fogTarget=Array.from({length:MAP_H},()=>Array(MAP_W).fill(1));
 const OPAQUE_TILES=new Set(["tree","stone","house","shrine"]);
+let fogTransitionStart=performance.now();
+let fogTransitionDuration=0;
 
 const camera={x:player.x+.5,y:player.y+.5};
 let zoom=1;
@@ -399,6 +417,33 @@ let cssHeight=innerHeight;
 let dpr=Math.min(devicePixelRatio||1,2);
 
 function clamp(value,min,max){return Math.min(max,Math.max(min,value))}
+
+function cubicBezier(x1,y1,x2,y2){
+  const cx=3*x1;
+  const bx=3*(x2-x1)-cx;
+  const ax=1-cx-bx;
+  const cy=3*y1;
+  const by=3*(y2-y1)-cy;
+  const ay=1-cy-by;
+
+  const sampleX=t=>((ax*t+bx)*t+cx)*t;
+  const sampleY=t=>((ay*t+by)*t+cy)*t;
+  const sampleDerivativeX=t=>(3*ax*t+2*bx)*t+cx;
+
+  return x=>{
+    let t=x;
+    for(let i=0;i<5;i++){
+      const dx=sampleX(t)-x;
+      const d=sampleDerivativeX(t);
+      if(Math.abs(d)<1e-6)break;
+      t=clamp(t-dx/d,0,1);
+    }
+    return sampleY(t);
+  };
+}
+
+const easeVision=cubicBezier(.77,0,.175,1);
+
 function hash(x,y,s=0){
   let n=x*374761393+y*668265263+s*982451653;
   n=(n^(n>>13))*1274126177;
@@ -454,7 +499,30 @@ function hasLineOfSight(ox,oy,tx,ty){
   return true;
 }
 
-function updateVision(){
+function updateFogTransition(now=performance.now()){
+  if(fogTransitionDuration<=0){
+    for(let y=0;y<MAP_H;y++){
+      for(let x=0;x<MAP_W;x++)fogCurrent[y][x]=fogTarget[y][x];
+    }
+    return;
+  }
+
+  const progress=clamp((now-fogTransitionStart)/fogTransitionDuration,0,1);
+  const eased=easeVision(progress);
+
+  for(let y=0;y<MAP_H;y++){
+    for(let x=0;x<MAP_W;x++){
+      fogCurrent[y][x]=fogFrom[y][x]+(fogTarget[y][x]-fogFrom[y][x])*eased;
+    }
+  }
+
+  if(progress>=1)fogTransitionDuration=0;
+}
+
+function updateVision({animate=true}={}){
+  const now=performance.now();
+  updateFogTransition(now);
+
   for(let y=0;y<MAP_H;y++){
     vision[y].fill(0);
   }
@@ -472,9 +540,30 @@ function updateVision(){
 
       strength=clamp(strength,0,1);
       vision[y][x]=strength;
-      if(strength>.015)discovered[y][x]=true;
     }
   }
+
+  for(let y=0;y<MAP_H;y++){
+    for(let x=0;x<MAP_W;x++){
+      fogFrom[y][x]=fogCurrent[y][x];
+
+      const strength=vision[y][x];
+      if(strength>.015)discovered[y][x]=true;
+
+      let target=1;
+      if(discovered[y][x]){
+        if(strength>=.999)target=0;
+        else if(strength<=.001)target=FOG_SEEN_ALPHA;
+        else target=FOG_SEEN_ALPHA*(1-strength);
+      }
+      fogTarget[y][x]=target;
+    }
+  }
+
+  fogTransitionStart=now;
+  fogTransitionDuration=animate&&!reduceMotion.matches?FOG_TRANSITION_MS:0;
+
+  if(fogTransitionDuration===0)updateFogTransition(now);
 }
 
 function isDiscovered(x,y){
@@ -611,7 +700,7 @@ function drawObject(type,x,y,s){
   }
 }
 
-function drawMap(){
+function drawMap(now){
   const s=BASE_TILE*zoom;
   const minX=Math.max(0,Math.floor(camera.x-cssWidth/(2*s))-2);
   const maxX=Math.min(MAP_W-1,Math.ceil(camera.x+cssWidth/(2*s))+2);
@@ -652,55 +741,60 @@ function drawMap(){
 
   drawInspect(s);
   drawPlayer(s);
-  drawFog(s,minX,maxX,minY,maxY);
+  drawFog(s,minX,maxX,minY,maxY,now);
 }
 
-function drawFog(s,minX,maxX,minY,maxY){
+function drawFog(s,minX,maxX,minY,maxY,now){
   ctx.save();
 
   for(let y=minY;y<=maxY;y++){
     for(let x=minX;x<=maxX;x++){
       const p=tileToScreen(x,y);
+      const alpha=fogCurrent[y][x];
 
-      if(!discovered[y][x]){
+      if(alpha<=.004)continue;
+
+      if(!discovered[y][x]&&alpha>=.995){
         ctx.fillStyle="#000";
         ctx.fillRect(Math.floor(p.x),Math.floor(p.y),Math.ceil(s)+1,Math.ceil(s)+1);
         continue;
       }
 
-      const strength=vision[y][x];
-      if(strength>=.999)continue;
-
-      if(strength<=.001){
-        ctx.fillStyle=`rgba(0,0,0,${FOG_SEEN_ALPHA})`;
+      const isGlitchEdge=alpha>.015&&alpha<FOG_SEEN_ALPHA-.015;
+      if(!isGlitchEdge){
+        ctx.fillStyle=`rgba(0,0,0,${clamp(alpha,0,1)})`;
         ctx.fillRect(Math.floor(p.x),Math.floor(p.y),Math.ceil(s)+1,Math.ceil(s)+1);
         continue;
       }
 
-      const baseAlpha=FOG_SEEN_ALPHA*(1-strength);
-      ctx.fillStyle=`rgba(0,0,0,${baseAlpha*.42})`;
-      ctx.fillRect(Math.floor(p.x),Math.floor(p.y),Math.ceil(s)+1,Math.ceil(s)+1);
-
       const cells=FOG_GLITCH_CELLS;
       const cell=s/cells;
+
       for(let gy=0;gy<cells;gy++){
         for(let gx=0;gx<cells;gx++){
-          const noise=hash(x*cells+gx,y*cells+gy,71);
-          const phase=hash(x*cells+gx,y*cells+gy,113);
-          let alpha=baseAlpha+(noise-.5)*.18;
-          if(phase>.83)alpha-=.10;
-          if(phase<.12)alpha+=.13;
-          alpha=clamp(Math.round(alpha/.055)*.055,0,FOG_SEEN_ALPHA);
-          if(alpha<=.01)continue;
+          const idX=x*cells+gx;
+          const idY=y*cells+gy;
+          const staticNoise=(hash(idX,idY,71)-.5)*FOG_GLITCH_VARIANCE;
+          const phase=hash(idX,idY,113)*Math.PI*2;
+          const period=FOG_PULSE_MIN_MS+
+            hash(idX,idY,149)*(FOG_PULSE_MAX_MS-FOG_PULSE_MIN_MS);
+          const amplitude=FOG_PULSE_AMPLITUDE*(.55+hash(idX,idY,173)*.45);
+          const pulse=reduceMotion.matches
+            ?0
+            :Math.sin((now/period)*Math.PI*2+phase)*amplitude;
 
-          const stretch=hash(x*cells+gx,y*cells+gy,191)>.86?2:1;
-          const offset=hash(x*cells+gx,y*cells+gy,233)>.88?cell*.28:0;
-          ctx.fillStyle=`rgba(0,0,0,${alpha})`;
+          let cellAlpha=clamp(alpha+staticNoise+pulse,0,FOG_SEEN_ALPHA);
+          if(cellAlpha<=.006)continue;
+
+          const merge=hash(idX,idY,191)>.90?2:1;
+          const width=Math.min(cells-gx,merge)*cell;
+
+          ctx.fillStyle=`rgba(0,0,0,${cellAlpha})`;
           ctx.fillRect(
-            Math.floor(p.x+gx*cell+offset),
-            Math.floor(p.y+gy*cell),
-            Math.ceil(cell*stretch)+1,
-            Math.ceil(cell)+1
+            p.x+gx*cell-.35,
+            p.y+gy*cell-.35,
+            width+.7,
+            cell+.7
           );
         }
       }
@@ -941,7 +1035,8 @@ function tick(now){
   camera.x+=(targetCameraX-camera.x)*.18;
   camera.y+=(targetCameraY-camera.y)*.18;
 
-  drawMap();
+  updateFogTransition(now);
+  drawMap(now);
   requestAnimationFrame(tick);
 }
 
@@ -966,7 +1061,7 @@ window.addEventListener("blur",hidePointer);
 window.addEventListener("pointerdown",wobblePointer);
 pointerShape.addEventListener("animationend",()=>pointerShape.classList.remove("is-wobbling"));
 
-updateVision();
+updateVision({animate:true});
 
 if(visualCheck){
   pointer.style.display="block";
