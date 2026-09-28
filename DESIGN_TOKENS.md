@@ -71,14 +71,15 @@
 | --- | --- | --- |
 | cells per tile | `8 × 8` logical grid | 像素块定位粒度，不整体铺满 |
 | blocks per tile | `9` | 稀疏不规则 glitch 块数量 |
-| smoke base factor | `.84` | 连续烟雾底层占目标 alpha 比例 |
-| alpha variance | `.065` | glitch 块静态差异 |
-| pulse amplitude | `.038` | 常态明灭幅度 |
+| spatial sampling | bilinear, 8×8 per tile | 主雾层在格内连续渐变 |
+| alpha variance | `.045` | glitch 块静态差异 |
+| cell pulse amplitude | `.016` | 主雾层像素块的轻微呼吸 |
+| block pulse amplitude | `.028` | 稀疏 glitch 块的明灭幅度 |
 | pulse period | `3.8–6.8s` | 每个像素块独立随机周期 |
 | geometry | fill only | 禁止描边 |
 | cell overlap | `.35px each side` | 消除网格缝/描边感 |
 
-Glitch 由连续烟雾底层和稀疏不规则像素块叠加形成，不使用 stroke、outline、可见格线或整格棋盘铺法。常态动画只改变 opacity，不移动块的位置，形成低频烟雾式呼吸，避免躁动。地图保留逻辑格子，但默认不绘制视觉格线。
+主雾层通过相邻地块 fog alpha 的双线性采样在格内连续变化，再以 8×8 像素块量化呈现；因此整体是渐变，但纹理仍是 pixel/glitch。其上仅叠加少量不规则暗块。全程不使用 stroke、outline、可见格线或整格棋盘纹理。常态动画只改变 opacity，不移动块的位置，形成低频烟雾式呼吸。地图保留逻辑格子，但默认不绘制视觉格线。
 
 ## Reduced motion
 

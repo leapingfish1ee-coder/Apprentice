@@ -322,12 +322,12 @@ const VISION_MAX_RADIUS=6.25;
 const FOG_SEEN_ALPHA=.64;
 const FOG_GLITCH_CELLS=8;
 const FOG_GLITCH_BLOCKS=9;
-const FOG_GLITCH_BASE_FACTOR=.84;
 const FOG_TRANSITION_MS=220;
 const FOG_PULSE_MIN_MS=3800;
 const FOG_PULSE_MAX_MS=6800;
-const FOG_PULSE_AMPLITUDE=.038;
-const FOG_GLITCH_VARIANCE=.065;
+const FOG_CELL_PULSE_AMPLITUDE=.016;
+const FOG_BLOCK_PULSE_AMPLITUDE=.028;
+const FOG_GLITCH_VARIANCE=.045;
 
 const TILE_INFO={
   grass:{name:"草地",walkable:true},
@@ -735,6 +735,21 @@ function drawMap(now){
   drawFog(s,minX,maxX,minY,maxY,now);
 }
 
+function sampleFog(worldX,worldY){
+  const fx=clamp(worldX-.5,0,MAP_W-1);
+  const fy=clamp(worldY-.5,0,MAP_H-1);
+  const x0=Math.floor(fx);
+  const y0=Math.floor(fy);
+  const x1=Math.min(MAP_W-1,x0+1);
+  const y1=Math.min(MAP_H-1,y0+1);
+  const tx=fx-x0;
+  const ty=fy-y0;
+
+  const top=fogCurrent[y0][x0]+(fogCurrent[y0][x1]-fogCurrent[y0][x0])*tx;
+  const bottom=fogCurrent[y1][x0]+(fogCurrent[y1][x1]-fogCurrent[y1][x0])*tx;
+  return top+(bottom-top)*ty;
+}
+
 function drawFog(s,minX,maxX,minY,maxY,now){
   ctx.save();
 
@@ -751,30 +766,40 @@ function drawFog(s,minX,maxX,minY,maxY,now){
         continue;
       }
 
-      const isGlitchEdge=alpha>.015&&alpha<FOG_SEEN_ALPHA-.015;
-      if(!isGlitchEdge){
-        ctx.fillStyle=`rgba(0,0,0,${clamp(alpha,0,1)})`;
-        ctx.fillRect(Math.floor(p.x),Math.floor(p.y),Math.ceil(s)+1,Math.ceil(s)+1);
-        continue;
-      }
-
       const cells=FOG_GLITCH_CELLS;
       const cell=s/cells;
-      const tilePhase=hash(x,y,97)*Math.PI*2;
-      const tilePeriod=FOG_PULSE_MIN_MS+
-        hash(x,y,131)*(FOG_PULSE_MAX_MS-FOG_PULSE_MIN_MS);
-      const tilePulse=reduceMotion.matches
-        ?0
-        :Math.sin((now/tilePeriod)*Math.PI*2+tilePhase)*FOG_PULSE_AMPLITUDE*.42;
-      const baseAlpha=clamp(alpha*FOG_GLITCH_BASE_FACTOR+tilePulse,0,FOG_SEEN_ALPHA);
 
-      ctx.fillStyle=`rgba(0,0,0,${baseAlpha})`;
-      ctx.fillRect(
-        Math.floor(p.x)-1,
-        Math.floor(p.y)-1,
-        Math.ceil(s)+2,
-        Math.ceil(s)+2
-      );
+      for(let gy=0;gy<cells;gy++){
+        for(let gx=0;gx<cells;gx++){
+          const worldX=x+(gx+.5)/cells;
+          const worldY=y+(gy+.5)/cells;
+          let cellAlpha=sampleFog(worldX,worldY);
+
+          const idX=x*cells+gx;
+          const idY=y*cells+gy;
+          const phase=hash(idX,idY,113)*Math.PI*2;
+          const period=FOG_PULSE_MIN_MS+
+            hash(idX,idY,149)*(FOG_PULSE_MAX_MS-FOG_PULSE_MIN_MS);
+
+          if(!reduceMotion.matches&&cellAlpha>.01&&cellAlpha<.98){
+            cellAlpha+=Math.sin((now/period)*Math.PI*2+phase)*FOG_CELL_PULSE_AMPLITUDE;
+          }
+
+          cellAlpha=clamp(cellAlpha,0,1);
+          if(cellAlpha<=.004)continue;
+
+          ctx.fillStyle=`rgba(0,0,0,${cellAlpha})`;
+          ctx.fillRect(
+            p.x+gx*cell-.45,
+            p.y+gy*cell-.45,
+            cell+.9,
+            cell+.9
+          );
+        }
+      }
+
+      const edgeActive=alpha>.01&&alpha<.985;
+      if(!edgeActive)continue;
 
       for(let block=0;block<FOG_GLITCH_BLOCKS;block++){
         const seed=block*17+3;
@@ -787,11 +812,11 @@ function drawFog(s,minX,maxX,minY,maxY,now){
           hash(x,y,seed+5)*(FOG_PULSE_MAX_MS-FOG_PULSE_MIN_MS);
         const pulse=reduceMotion.matches
           ?0
-          :Math.sin((now/period)*Math.PI*2+phase)*FOG_PULSE_AMPLITUDE;
+          :Math.sin((now/period)*Math.PI*2+phase)*FOG_BLOCK_PULSE_AMPLITUDE;
         const variance=(hash(x,y,seed+6)-.5)*FOG_GLITCH_VARIANCE;
-        const blockAlpha=clamp(.035+variance+pulse,0,.11);
+        const blockAlpha=clamp(.022+variance+pulse,0,.075);
 
-        if(blockAlpha<=.004)continue;
+        if(blockAlpha<=.003)continue;
 
         ctx.fillStyle=`rgba(0,0,0,${blockAlpha})`;
         ctx.fillRect(
