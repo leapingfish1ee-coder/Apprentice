@@ -216,7 +216,7 @@ body{
 
 <div class="hud hud-top" aria-hidden="true">
   <h1 class="hud-title">青苔村外</h1>
-  <div class="hud-row"><span class="hud-key">位置</span><span class="hud-value" id="coord">12, 14</span></div>
+  <div class="hud-row"><span class="hud-key">位置</span><span class="hud-value" id="coord">12, 12</span></div>
   <div class="hud-row"><span class="hud-key">朝向</span><span class="hud-value" id="facing">南</span></div>
   <div class="hud-row"><span class="hud-key">探索</span><span class="hud-value" id="exploration">0%</span></div>
 </div>
@@ -387,7 +387,13 @@ const TILE_INFO={
   cart:{name:"破车",walkable:false},
   ruin:{name:"残垣",walkable:false},
   shrine:{name:"路祠",walkable:false},
-  house:{name:"民家",walkable:false}
+  floor:{name:"木地板",walkable:true},
+  wall:{name:"墙体",walkable:false},
+  door:{name:"门洞",walkable:true},
+  bed:{name:"床铺",walkable:false},
+  table:{name:"木桌",walkable:false},
+  shelf:{name:"置物架",walkable:false},
+  hearth:{name:"炉灶",walkable:false}
 };
 
 const map=Array.from({length:MAP_H},()=>Array(MAP_W).fill("field"));
@@ -399,6 +405,31 @@ function setTile(x,y,type){
 function setRoadTile(x,y){
   const current=tileAt(x,y);
   setTile(x,y,current==="water"?"bridge":"path");
+}
+
+function placeBuilding(x,y,w,h,doors=[]){
+  for(let ty=y;ty<y+h;ty++){
+    for(let tx=x;tx<x+w;tx++){
+      const perimeter=tx===x||tx===x+w-1||ty===y||ty===y+h-1;
+      setTile(tx,ty,perimeter?"wall":"floor");
+    }
+  }
+
+  for(const [dx,dy] of doors)setTile(dx,dy,"door");
+}
+
+function placeWallLine(x1,y1,x2,y2,doorX=null,doorY=null){
+  const dx=Math.sign(x2-x1);
+  const dy=Math.sign(y2-y1);
+  let x=x1;
+  let y=y1;
+
+  while(true){
+    setTile(x,y,x===doorX&&y===doorY?"door":"wall");
+    if(x===x2&&y===y2)break;
+    x+=dx;
+    y+=dy;
+  }
 }
 
 function buildMap(){
@@ -458,20 +489,45 @@ function buildMap(){
     }
   }
 
-  // Houses are deliberately offset from the road, leaving small yards.
-  [[8,7],[15,8],[9,10]].forEach(([x,y])=>setTile(x,y,"house"));
-  [[7,8],[7,9],[16,9],[17,9],[8,11],[9,11]].forEach(([x,y])=>{
+  // RPG-style cutaway buildings: continuous outer walls, walkable floors,
+  // real door openings, interior partitions and furniture collision.
+  placeBuilding(5,5,7,6,[[8,10]]);
+  placeWallLine(8,6,8,9,8,8);
+  setTile(6,6,"bed");
+  setTile(6,8,"shelf");
+  setTile(9,7,"table");
+  setTile(10,6,"hearth");
+
+  placeBuilding(14,5,7,6,[[16,10]]);
+  placeWallLine(15,7,19,7,17,7);
+  setTile(15,6,"bed");
+  setTile(19,6,"shelf");
+  setTile(17,9,"table");
+  setTile(19,9,"hearth");
+
+  placeBuilding(18,11,7,5,[[21,15]]);
+  placeWallLine(21,12,21,14,21,13);
+  setTile(19,12,"shelf");
+  setTile(19,14,"table");
+  setTile(22,12,"hearth");
+  setTile(23,14,"bed");
+
+  // Mud yards and exterior traces connect buildings back to the road.
+  [[8,11],[9,11],[10,11],[16,11],[17,11],[20,16],[21,16],[22,16]].forEach(([x,y])=>{
+    if(tileAt(x,y)!=="path")setTile(x,y,"mud");
+  });
+  [[4,8],[4,9],[12,7],[13,7],[21,10],[22,10]].forEach(([x,y])=>{
     if(tileAt(x,y)!=="path")setTile(x,y,"fence");
   });
-  setTile(6,9,"cart");
-  setTile(17,7,"stump");
+  setTile(4,10,"cart");
+  setTile(13,6,"stump");
 
-  // Roadside ruin / shrine cluster.
-  setTile(21,15,"shrine");
-  setTile(22,14,"ruin");
-  setTile(23,14,"ruin");
-  setTile(23,15,"log");
-  setTile(20,14,"stone");
+  // Roadside ruin / shrine cluster, kept separate from usable interiors.
+  setTile(25,16,"shrine");
+  setTile(24,14,"ruin");
+  setTile(25,14,"ruin");
+  setTile(25,15,"log");
+  setTile(24,16,"stone");
 
   // Dense forest edge and irregular interior copses.
   for(let y=0;y<MAP_H;y++){
@@ -542,21 +598,24 @@ function buildMap(){
   }
 
   // Ensure the player spawn and immediate movement corridor are valid.
+  setTile(12,12,"path");
+  setTile(12,13,"path");
+  setTile(12,14,"path");
+  setTile(12,15,"path");
   setTile(12,16,"path");
   setTile(11,16,"path");
   setTile(13,16,"path");
-  setTile(12,15,"path");
   setTile(12,17,"path");
 }
 buildMap();
 
 const player={
-  x:12,y:14,
-  renderX:12,renderY:14,
+  x:12,y:12,
+  renderX:12,renderY:12,
   facing:"south",
   moving:false,
-  fromX:12,fromY:14,
-  toX:12,toY:14,
+  fromX:12,fromY:12,
+  toX:12,toY:12,
   moveStart:0,
   path:[]
 };
@@ -566,7 +625,7 @@ const vision=Array.from({length:MAP_H},()=>Array(MAP_W).fill(0));
 const fogCurrent=Array.from({length:MAP_H},()=>Array(MAP_W).fill(1));
 const fogFrom=Array.from({length:MAP_H},()=>Array(MAP_W).fill(1));
 const fogTarget=Array.from({length:MAP_H},()=>Array(MAP_W).fill(1));
-const OPAQUE_TILES=new Set(["tree","bush","house","shrine","ruin"]);
+const OPAQUE_TILES=new Set(["tree","bush","wall","shrine","ruin"]);
 let fogTransitionStart=performance.now();
 let fogTransitionDuration=0;
 let fogTextureLastUpdate=-Infinity;
@@ -912,7 +971,7 @@ function drawGroundTile(type,x,y,s,target=ctx,tileX=0,tileY=0){
   const py=Math.floor(y);
   const seed=hash(tileX,tileY,601);
 
-  const openGround=["field","grass","flower","tree","bush","stump","log","stone","house","shrine","fence","cart","ruin"];
+  const openGround=["field","grass","flower","tree","bush","stump","log","stone","shrine","fence","cart","ruin"];
   if(openGround.includes(type)){
     const base=type==="grass"||seed>.58?"#667253":"#77745a";
     target.fillStyle=base;
@@ -1065,6 +1124,68 @@ function drawGroundTile(type,x,y,s,target=ctx,tileX=0,tileY=0){
     target.beginPath();target.moveTo(x,y+s*.15);target.lineTo(x+s,y+s*.15);target.stroke();
     target.beginPath();target.moveTo(x,y+s*.84);target.lineTo(x+s,y+s*.84);target.stroke();
   }
+
+  if(type==="floor"||type==="door"||type==="bed"||type==="table"||type==="shelf"||type==="hearth"){
+    target.fillStyle="#8a7356";
+    target.fillRect(px,py,Math.ceil(s)+1,Math.ceil(s)+1);
+
+    target.strokeStyle="rgba(55,40,29,.24)";
+    target.lineWidth=Math.max(.7,s*.014);
+    for(let i=1;i<4;i++){
+      const yy=y+s*i/4;
+      target.beginPath();
+      target.moveTo(x,yy);
+      target.lineTo(x+s,yy);
+      target.stroke();
+    }
+
+    target.strokeStyle="rgba(211,181,132,.11)";
+    target.lineWidth=Math.max(.6,s*.01);
+    const grainY=y+s*(.18+hash(tileX,tileY,781)*.62);
+    target.beginPath();
+    target.moveTo(x+s*.08,grainY);
+    target.lineTo(x+s*.92,grainY+s*.012);
+    target.stroke();
+
+    if(type==="door"){
+      target.fillStyle="#4a3728";
+      target.fillRect(x+s*.08,y+s*.06,s*.12,s*.88);
+      target.fillRect(x+s*.80,y+s*.06,s*.12,s*.88);
+      target.fillStyle="#b08a5d";
+      target.fillRect(x+s*.14,y+s*.44,s*.72,s*.10);
+      target.fillStyle="rgba(36,27,21,.30)";
+      target.fillRect(x+s*.17,y+s*.54,s*.66,s*.10);
+    }
+  }
+
+  if(type==="wall"){
+    target.fillStyle="#43382f";
+    target.fillRect(px,py,Math.ceil(s)+1,Math.ceil(s)+1);
+
+    target.fillStyle="#8f806c";
+    target.fillRect(x+s*.08,y+s*.14,s*.84,s*.70);
+
+    target.fillStyle="#594638";
+    target.fillRect(x,y+s*.06,s,s*.17);
+    target.fillStyle="#6b5542";
+    target.fillRect(x+s*.08,y+s*.78,s*.84,s*.14);
+
+    target.strokeStyle="rgba(224,207,172,.19)";
+    target.lineWidth=Math.max(.7,s*.012);
+    target.beginPath();
+    target.moveTo(x+s*.12,y+s*.31);
+    target.lineTo(x+s*.88,y+s*.31);
+    target.moveTo(x+s*.12,y+s*.57);
+    target.lineTo(x+s*.88,y+s*.57);
+    target.stroke();
+
+    target.fillStyle="rgba(48,37,29,.22)";
+    if(hash(tileX,tileY,791)>.5){
+      target.fillRect(x+s*.16,y+s*.38,s*.24,s*.07);
+    }else{
+      target.fillRect(x+s*.58,y+s*.61,s*.20,s*.06);
+    }
+  }
 }
 
 function drawObject(type,x,y,s,target=ctx){
@@ -1195,36 +1316,6 @@ function drawObject(type,x,y,s,target=ctx){
     target.strokeStyle="rgba(190,147,91,.24)";
     target.lineWidth=Math.max(1,s*.02);
     target.strokeRect(x+s*.28,y+s*.42,s*.45,s*.17);
-  }else if(type==="house"){
-    target.fillStyle="rgba(34,29,25,.22)";
-    target.beginPath();target.ellipse(x+s*.52,y+s*.84,s*.48,s*.13,0,0,Math.PI*2);target.fill();
-
-    target.fillStyle="#9b8b73";
-    target.fillRect(x+s*.10,y+s*.39,s*.82,s*.48);
-    target.fillStyle="#685849";
-    target.fillRect(x+s*.14,y+s*.44,s*.08,s*.43);
-    target.fillRect(x+s*.78,y+s*.44,s*.08,s*.43);
-
-    target.fillStyle="#493a31";
-    target.beginPath();
-    target.moveTo(x-s*.03,y+s*.42);
-    target.lineTo(x+s*.50,y+s*.08);
-    target.lineTo(x+s*1.03,y+s*.42);
-    target.lineTo(x+s*.91,y+s*.53);
-    target.lineTo(x+s*.09,y+s*.53);
-    target.closePath();target.fill();
-
-    target.strokeStyle="rgba(152,112,76,.32)";
-    target.lineWidth=Math.max(1,s*.022);
-    for(let i=0;i<5;i++){
-      const yy=y+s*(.23+i*.055);
-      target.beginPath();target.moveTo(x+s*.14,yy);target.lineTo(x+s*.86,yy+s*.01);target.stroke();
-    }
-
-    target.fillStyle="#554033";
-    target.fillRect(x+s*.42,y+s*.61,s*.18,s*.26);
-    target.fillStyle="#879076";
-    target.fillRect(x+s*.68,y+s*.58,s*.10,s*.10);
   }else if(type==="shrine"){
     target.fillStyle="rgba(37,30,24,.18)";
     target.beginPath();target.ellipse(x+s*.50,y+s*.80,s*.33,s*.09,0,0,Math.PI*2);target.fill();
@@ -1235,6 +1326,45 @@ function drawObject(type,x,y,s,target=ctx){
     target.fillRect(x+s*.23,y+s*.19,s*.54,s*.07);
     target.fillStyle="#44362e";
     target.fillRect(x+s*.23,y+s*.82,s*.54,s*.06);
+  }else if(type==="bed"){
+    target.fillStyle="rgba(40,31,25,.18)";
+    target.fillRect(x+s*.16,y+s*.20,s*.70,s*.64);
+    target.fillStyle="#5f4938";
+    target.fillRect(x+s*.12,y+s*.16,s*.76,s*.14);
+    target.fillStyle="#85755f";
+    target.fillRect(x+s*.18,y+s*.28,s*.64,s*.52);
+    target.fillStyle="#b5a27e";
+    target.fillRect(x+s*.22,y+s*.31,s*.56,s*.17);
+    target.fillStyle="#625447";
+    target.fillRect(x+s*.23,y+s*.51,s*.54,s*.25);
+  }else if(type==="table"){
+    target.fillStyle="rgba(39,30,23,.18)";
+    target.beginPath();target.ellipse(x+s*.50,y+s*.73,s*.31,s*.09,0,0,Math.PI*2);target.fill();
+    target.fillStyle="#664a34";
+    target.fillRect(x+s*.16,y+s*.30,s*.68,s*.37);
+    target.fillStyle="#8b6848";
+    target.fillRect(x+s*.13,y+s*.26,s*.74,s*.13);
+    target.fillStyle="#443126";
+    target.fillRect(x+s*.20,y+s*.64,s*.10,s*.18);
+    target.fillRect(x+s*.70,y+s*.64,s*.10,s*.18);
+  }else if(type==="shelf"){
+    target.fillStyle="#4d392c";
+    target.fillRect(x+s*.16,y+s*.14,s*.68,s*.72);
+    target.fillStyle="#76583d";
+    for(const yy of [.28,.48,.68])target.fillRect(x+s*.20,y+s*yy,s*.60,s*.07);
+    target.fillStyle="#a3855f";
+    target.fillRect(x+s*.25,y+s*.20,s*.11,s*.08);
+    target.fillRect(x+s*.58,y+s*.39,s*.15,s*.08);
+    target.fillRect(x+s*.37,y+s*.59,s*.13,s*.08);
+  }else if(type==="hearth"){
+    target.fillStyle="#58534a";
+    target.fillRect(x+s*.15,y+s*.26,s*.70,s*.58);
+    target.fillStyle="#38332d";
+    target.fillRect(x+s*.25,y+s*.42,s*.50,s*.32);
+    target.fillStyle="#9b5c38";
+    target.fillRect(x+s*.34,y+s*.55,s*.32,s*.14);
+    target.fillStyle="rgba(219,167,92,.55)";
+    target.fillRect(x+s*.43,y+s*.49,s*.14,s*.15);
   }
 }
 
@@ -1648,7 +1778,7 @@ if(visualCheck){
   pointer.style.left="64%";
   pointer.style.top="42%";
   pointer.dataset.visible="true";
-  inspectTile={x:9,y:10};
+  inspectTile={x:8,y:10};
 }
 
 if(perfCheck){
