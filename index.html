@@ -48,8 +48,8 @@ body{
   height:100%;
   overflow:visible;
   filter:
-    drop-shadow(0 1px .7px rgba(50,31,20,.35))
-    drop-shadow(0 2px 2px rgba(50,31,20,.12));
+    drop-shadow(0 1px .7px rgba(72,47,30,.26))
+    drop-shadow(0 2px 2px rgba(72,47,30,.08));
 }
 
 @media (hover:hover) and (pointer:fine){
@@ -92,22 +92,22 @@ body{
       </clipPath>
 
       <linearGradient id="warmTint" x1="2" y1="2" x2="29" y2="29" gradientUnits="userSpaceOnUse">
-        <stop offset="0" stop-color="#efc892" stop-opacity=".40"/>
-        <stop offset=".28" stop-color="#c98e58" stop-opacity=".10"/>
-        <stop offset=".62" stop-color="#684126" stop-opacity=".05"/>
-        <stop offset="1" stop-color="#2f1b11" stop-opacity=".46"/>
+        <stop offset="0" stop-color="#f6d5a6" stop-opacity=".52"/>
+        <stop offset=".28" stop-color="#d9a06a" stop-opacity=".22"/>
+        <stop offset=".62" stop-color="#8b5936" stop-opacity=".02"/>
+        <stop offset="1" stop-color="#5d3824" stop-opacity=".22"/>
       </linearGradient>
 
       <linearGradient id="chamferTop" x1="2" y1="2" x2="18" y2="18" gradientUnits="userSpaceOnUse">
-        <stop offset="0" stop-color="#fff0cf" stop-opacity=".62"/>
-        <stop offset=".42" stop-color="#e5b77e" stop-opacity=".18"/>
+        <stop offset="0" stop-color="#fff1d2" stop-opacity=".72"/>
+        <stop offset=".42" stop-color="#eabf88" stop-opacity=".24"/>
         <stop offset="1" stop-color="#7a4d2f" stop-opacity="0"/>
       </linearGradient>
 
       <linearGradient id="chamferDark" x1="8" y1="8" x2="29" y2="29" gradientUnits="userSpaceOnUse">
         <stop offset=".38" stop-color="#4c2b1b" stop-opacity="0"/>
-        <stop offset=".76" stop-color="#2c180f" stop-opacity=".28"/>
-        <stop offset="1" stop-color="#1b0f0a" stop-opacity=".66"/>
+        <stop offset=".76" stop-color="#70452b" stop-opacity=".12"/>
+        <stop offset="1" stop-color="#3e2417" stop-opacity=".32"/>
       </linearGradient>
 
       <filter id="microRelief" x="-15%" y="-15%" width="130%" height="130%">
@@ -126,7 +126,7 @@ body{
     </defs>
 
     <g clip-path="url(#tenonClip)">
-      <rect width="32" height="32" fill="#875635"/>
+      <rect width="32" height="32" fill="#a86f46"/>
 
       <image
         href="https://cdn.polyhaven.com/asset_img/thumbs/fine_grained_wood.png?height=256&amp;quality=95"
@@ -135,13 +135,14 @@ body{
         width="54"
         height="40"
         preserveAspectRatio="xMidYMid slice"
+        opacity=".84"
         transform="rotate(27 16 16)"
       />
 
       <rect width="32" height="32" fill="url(#warmTint)"/>
       <rect width="32" height="32" fill="url(#chamferTop)"/>
       <rect width="32" height="32" fill="url(#chamferDark)"/>
-      <rect width="32" height="32" filter="url(#microRelief)" opacity=".36"/>
+      <rect width="32" height="32" filter="url(#microRelief)" opacity=".26"/>
 
       <path
         d="M1.6 8.0 C7.1 6.2 12.8 8.3 18.2 10.7 S27 13.3 32 11.4"
@@ -154,8 +155,8 @@ body{
       <path
         d="M1.0 14.6 C6.9 12.7 12.3 15.4 18.0 17.0 S26.0 20.0 31.4 18.1"
         fill="none"
-        stroke="#3b2116"
-        stroke-opacity=".36"
+        stroke="#5d3825"
+        stroke-opacity=".25"
         stroke-width=".70"
         stroke-linecap="round"
       />
@@ -174,8 +175,8 @@ body{
         rx="3.8"
         ry="2.3"
         transform="rotate(27 19.9 18.9)"
-        fill="#341c12"
-        fill-opacity=".26"
+        fill="#5a3522"
+        fill-opacity=".18"
       />
       <ellipse
         cx="19.9"
@@ -193,8 +194,8 @@ body{
     <use
       href="#tenonShape"
       fill="none"
-      stroke="#3b2116"
-      stroke-width="1.05"
+      stroke="#5a3825"
+      stroke-width=".92"
       stroke-linejoin="round"
     />
 
@@ -217,8 +218,8 @@ body{
          L24.64 26.73
          C24.21 27.60 23.31 28.05 22.35 27.81"
       fill="none"
-      stroke="#23130d"
-      stroke-opacity=".72"
+      stroke="#4a2d1e"
+      stroke-opacity=".55"
       stroke-width=".72"
       stroke-linecap="round"
     />
