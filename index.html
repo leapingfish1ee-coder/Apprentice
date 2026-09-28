@@ -229,6 +229,14 @@ body{
 <script>
 const pointer=document.querySelector("#pointer");
 const finePointer=matchMedia("(hover: hover) and (pointer: fine)");
+const visualCheck=new URLSearchParams(location.search).has("visual-check");
+
+if(visualCheck){
+  pointer.style.display="block";
+  pointer.style.left="50%";
+  pointer.style.top="50%";
+  pointer.dataset.visible="true";
+}
 
 function movePointer(event){
   if(!finePointer.matches)return;

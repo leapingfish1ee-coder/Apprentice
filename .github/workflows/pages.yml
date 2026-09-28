@@ -29,3 +29,28 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  visual-check:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Render visual check
+        run: |
+          python3 -m http.server 4173 >/tmp/apprentice-http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID' EXIT
+          sleep 1
+          "${{ steps.chrome.outputs.chrome-path }}"             --headless=new             --disable-gpu             --no-sandbox             --hide-scrollbars             --window-size=800,500             --virtual-time-budget=3000             --screenshot=visual-check.png             "http://127.0.0.1:4173/?visual-check=1"
+
+      - name: Upload visual check
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-check-${{ github.sha }}
+          path: visual-check.png
+          retention-days: 14
