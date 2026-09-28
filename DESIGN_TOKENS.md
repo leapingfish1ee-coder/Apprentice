@@ -69,14 +69,16 @@
 
 | Token | Value | Purpose |
 | --- | --- | --- |
-| cells per tile | `8 × 8` | 像素化粒度 |
-| alpha variance | `.11` | 固定块间差异 |
-| pulse amplitude | `.045` | 常态明灭幅度 |
+| cells per tile | `8 × 8` logical grid | 像素块定位粒度，不整体铺满 |
+| blocks per tile | `9` | 稀疏不规则 glitch 块数量 |
+| smoke base factor | `.84` | 连续烟雾底层占目标 alpha 比例 |
+| alpha variance | `.065` | glitch 块静态差异 |
+| pulse amplitude | `.038` | 常态明灭幅度 |
 | pulse period | `3.8–6.8s` | 每个像素块独立随机周期 |
 | geometry | fill only | 禁止描边 |
 | cell overlap | `.35px each side` | 消除网格缝/描边感 |
 
-Glitch 只通过相邻像素块透明度差和少量横向块合并形成，不使用 stroke、outline 或格线。常态动画只改变 opacity，不移动块的位置，形成低频烟雾式呼吸，避免躁动。
+Glitch 由连续烟雾底层和稀疏不规则像素块叠加形成，不使用 stroke、outline、可见格线或整格棋盘铺法。常态动画只改变 opacity，不移动块的位置，形成低频烟雾式呼吸，避免躁动。地图保留逻辑格子，但默认不绘制视觉格线。
 
 ## Reduced motion
 

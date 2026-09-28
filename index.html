@@ -321,11 +321,13 @@ const VISION_CLEAR_RADIUS=4.25;
 const VISION_MAX_RADIUS=6.25;
 const FOG_SEEN_ALPHA=.64;
 const FOG_GLITCH_CELLS=8;
+const FOG_GLITCH_BLOCKS=9;
+const FOG_GLITCH_BASE_FACTOR=.84;
 const FOG_TRANSITION_MS=220;
 const FOG_PULSE_MIN_MS=3800;
 const FOG_PULSE_MAX_MS=6800;
-const FOG_PULSE_AMPLITUDE=.045;
-const FOG_GLITCH_VARIANCE=.11;
+const FOG_PULSE_AMPLITUDE=.038;
+const FOG_GLITCH_VARIANCE=.065;
 
 const TILE_INFO={
   grass:{name:"草地",walkable:true},
@@ -718,17 +720,6 @@ function drawMap(now){
     }
   }
 
-  ctx.strokeStyle="rgba(70,66,55,.055)";
-  ctx.lineWidth=1;
-  for(let y=minY;y<=maxY+1;y++){
-    const p=tileToScreen(minX,y);
-    ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(tileToScreen(maxX+1,y).x,p.y);ctx.stroke();
-  }
-  for(let x=minX;x<=maxX+1;x++){
-    const p=tileToScreen(x,minY);
-    ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x,tileToScreen(x,maxY+1).y);ctx.stroke();
-  }
-
   for(let y=minY;y<=maxY;y++){
     for(let x=minX;x<=maxX;x++){
       const type=tileAt(x,y);
@@ -769,34 +760,46 @@ function drawFog(s,minX,maxX,minY,maxY,now){
 
       const cells=FOG_GLITCH_CELLS;
       const cell=s/cells;
+      const tilePhase=hash(x,y,97)*Math.PI*2;
+      const tilePeriod=FOG_PULSE_MIN_MS+
+        hash(x,y,131)*(FOG_PULSE_MAX_MS-FOG_PULSE_MIN_MS);
+      const tilePulse=reduceMotion.matches
+        ?0
+        :Math.sin((now/tilePeriod)*Math.PI*2+tilePhase)*FOG_PULSE_AMPLITUDE*.42;
+      const baseAlpha=clamp(alpha*FOG_GLITCH_BASE_FACTOR+tilePulse,0,FOG_SEEN_ALPHA);
 
-      for(let gy=0;gy<cells;gy++){
-        for(let gx=0;gx<cells;gx++){
-          const idX=x*cells+gx;
-          const idY=y*cells+gy;
-          const staticNoise=(hash(idX,idY,71)-.5)*FOG_GLITCH_VARIANCE;
-          const phase=hash(idX,idY,113)*Math.PI*2;
-          const period=FOG_PULSE_MIN_MS+
-            hash(idX,idY,149)*(FOG_PULSE_MAX_MS-FOG_PULSE_MIN_MS);
-          const amplitude=FOG_PULSE_AMPLITUDE*(.55+hash(idX,idY,173)*.45);
-          const pulse=reduceMotion.matches
-            ?0
-            :Math.sin((now/period)*Math.PI*2+phase)*amplitude;
+      ctx.fillStyle=`rgba(0,0,0,${baseAlpha})`;
+      ctx.fillRect(
+        Math.floor(p.x)-1,
+        Math.floor(p.y)-1,
+        Math.ceil(s)+2,
+        Math.ceil(s)+2
+      );
 
-          let cellAlpha=clamp(alpha+staticNoise+pulse,0,FOG_SEEN_ALPHA);
-          if(cellAlpha<=.006)continue;
+      for(let block=0;block<FOG_GLITCH_BLOCKS;block++){
+        const seed=block*17+3;
+        const gx=Math.floor(hash(x,y,seed)*cells);
+        const gy=Math.floor(hash(x,y,seed+1)*cells);
+        const blockW=1+Math.floor(hash(x,y,seed+2)*3);
+        const blockH=1+Math.floor(hash(x,y,seed+3)*2);
+        const phase=hash(x,y,seed+4)*Math.PI*2;
+        const period=FOG_PULSE_MIN_MS+
+          hash(x,y,seed+5)*(FOG_PULSE_MAX_MS-FOG_PULSE_MIN_MS);
+        const pulse=reduceMotion.matches
+          ?0
+          :Math.sin((now/period)*Math.PI*2+phase)*FOG_PULSE_AMPLITUDE;
+        const variance=(hash(x,y,seed+6)-.5)*FOG_GLITCH_VARIANCE;
+        const blockAlpha=clamp(.035+variance+pulse,0,.11);
 
-          const merge=hash(idX,idY,191)>.90?2:1;
-          const width=Math.min(cells-gx,merge)*cell;
+        if(blockAlpha<=.004)continue;
 
-          ctx.fillStyle=`rgba(0,0,0,${cellAlpha})`;
-          ctx.fillRect(
-            p.x+gx*cell-.35,
-            p.y+gy*cell-.35,
-            width+.7,
-            cell+.7
-          );
-        }
+        ctx.fillStyle=`rgba(0,0,0,${blockAlpha})`;
+        ctx.fillRect(
+          p.x+gx*cell-.6,
+          p.y+gy*cell-.6,
+          Math.min(cells-gx,blockW)*cell+1.2,
+          Math.min(cells-gy,blockH)*cell+1.2
+        );
       }
     }
   }
