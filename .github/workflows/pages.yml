@@ -11,7 +11,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-stable
   cancel-in-progress: true
 
 jobs:
@@ -40,43 +40,26 @@ jobs:
         id: chrome
         uses: browser-actions/setup-chrome@v1
 
-      - name: Render visual and performance checks
+      - name: Render visual check
         run: |
           python3 -m http.server 4173 >/tmp/apprentice-http.log 2>&1 &
           SERVER_PID=$!
           trap 'kill $SERVER_PID' EXIT
           sleep 1
 
-          CHROME="${{ steps.chrome.outputs.chrome-path }}"
+          "${{ steps.chrome.outputs.chrome-path }}" \
+            --headless=new \
+            --disable-gpu \
+            --no-sandbox \
+            --hide-scrollbars \
+            --window-size=800,500 \
+            --virtual-time-budget=3000 \
+            --screenshot=visual-check.png \
+            "http://127.0.0.1:4173/?visual-check=1"
 
-          "$CHROME"             --headless=new             --disable-gpu             --no-sandbox             --hide-scrollbars             --window-size=800,500             --virtual-time-budget=3000             --screenshot=visual-check.png             "http://127.0.0.1:4173/?visual-check=1"
-
-          "$CHROME"             --headless=new             --disable-gpu             --no-sandbox             --hide-scrollbars             --window-size=800,500             --virtual-time-budget=8000             --dump-dom             "http://127.0.0.1:4173/?perf-check=1" > perf-dom.html
-
-          python3 - <<'PY'
-          import html
-          import json
-          import re
-
-          source=open("perf-dom.html",encoding="utf-8").read()
-          match=re.search(r'<pre id="perf-report" hidden="">(.*?)</pre>',source,re.S)
-          if not match:
-              match=re.search(r'<pre id="perf-report" hidden>(.*?)</pre>',source,re.S)
-          if not match:
-              raise SystemExit("performance report not found")
-
-          raw=html.unescape(match.group(1)).strip()
-          data=json.loads(raw)
-          with open("perf-check.json","w",encoding="utf-8") as output:
-              json.dump(data,output,ensure_ascii=False,indent=2)
-          print(json.dumps(data,ensure_ascii=False,indent=2))
-          PY
-
-      - name: Upload visual and performance checks
+      - name: Upload visual check
         uses: actions/upload-artifact@v4
         with:
           name: visual-check-${{ github.sha }}
-          path: |
-            visual-check.png
-            perf-check.json
+          path: visual-check.png
           retention-days: 14
