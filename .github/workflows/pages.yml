@@ -85,6 +85,9 @@ jobs:
 
           cat >/tmp/read-perf.mjs <<'NODE'
           const port=Number(process.argv[2]);
+          const width=Number(process.argv[3]);
+          const height=Number(process.argv[4]);
+          const scale=Number(process.argv[5]);
           const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
           let targets;
@@ -122,6 +125,14 @@ jobs:
           });
 
           await send("Runtime.enable");
+          await send("Emulation.setDeviceMetricsOverride",{
+            width,
+            height,
+            deviceScaleFactor:scale,
+            mobile:false,
+            screenWidth:width,
+            screenHeight:height
+          });
           await sleep(8000);
           const response=await send("Runtime.evaluate",{
             expression:"JSON.stringify(window.__APPRENTICE_PERF__)",
@@ -138,8 +149,9 @@ jobs:
           run_case() {
             NAME="$1"
             PORT="$2"
-            WINDOW="$3"
-            SCALE="$4"
+            WIDTH="$3"
+            HEIGHT="$4"
+            SCALE="$5"
             PROFILE="/tmp/apprentice-${NAME}"
 
             "$CHROME" \
@@ -152,20 +164,19 @@ jobs:
               --disable-backgrounding-occluded-windows \
               --remote-debugging-port="$PORT" \
               --user-data-dir="$PROFILE" \
-              --window-size="$WINDOW" \
-              --force-device-scale-factor="$SCALE" \
+              --window-size=800,600 \
               "http://127.0.0.1:4174/?perf-check=1" \
               >"/tmp/${NAME}.log" 2>&1 &
             PID=$!
 
-            node /tmp/read-perf.mjs "$PORT" >"${NAME}.json"
+            node /tmp/read-perf.mjs "$PORT" "$WIDTH" "$HEIGHT" "$SCALE" >"${NAME}.json"
             kill "$PID" 2>/dev/null || true
             wait "$PID" 2>/dev/null || true
           }
 
-          run_case perf-800x500-dpr1 9222 800,500 1
-          run_case perf-1440x900-dpr1 9223 1440,900 1
-          run_case perf-1440x900-dpr2 9224 2880,1800 2
+          run_case perf-800x500-dpr1 9222 800 500 1
+          run_case perf-1440x900-dpr1 9223 1440 900 1
+          run_case perf-1440x900-dpr2 9224 1440 900 2
 
           python3 - <<'PY'
           import json
