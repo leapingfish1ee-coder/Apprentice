@@ -89,3 +89,20 @@
 - glitch 常态 pulse 停止。
 - 指针点击颤动停止。
 - 保留黑雾层级、已探索/未探索信息和颜色/透明度差异。
+
+
+## Performance HUD
+
+| Token | Value | Purpose |
+| --- | --- | --- |
+| HUD position | top-right | 常驻性能读数，不占地图交互区域 |
+| HUD font size | `10px` | 弱化为诊断信息 |
+| update interval | `250ms` | 避免每帧更新 DOM |
+| sample window | `240 frames` | 平滑实时统计并保留短时抖动 |
+| slow-frame threshold | `20ms` | 统计明显超过 60Hz 帧预算的帧 |
+| target frame rate | `60 FPS` | 当前地图与雾效的基础目标 |
+| 60Hz frame budget | `16.67ms` | 单帧总预算 |
+
+常驻 HUD 显示实时 FPS、窗口平均 FPS、P95 frame time 与平均 Canvas draw time。性能采样在主循环中进行，但 HUD DOM 每 250ms 才更新一次。
+
+GitHub Actions 的性能检查使用固定 `800×500` 视口，运行约 8 秒，并让角色在已知安全路径上持续移动，以覆盖玩家移动、镜头跟随、LOS 更新、视野过渡和 glitch fog 常态动画。CI 使用 headless Chrome 与软件渲染环境，其数值主要用于版本间回归比较，不代表所有真实设备的绝对性能。

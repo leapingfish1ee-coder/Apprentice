@@ -70,6 +70,22 @@ body{
   bottom:16px;
   text-align:right;
 }
+.hud-perf{
+  top:16px;
+  right:18px;
+  text-align:right;
+  font-size:10px;
+  line-height:1.55;
+  letter-spacing:.055em;
+  font-variant-numeric:tabular-nums;
+}
+.perf-line{white-space:nowrap}
+.perf-label{
+  color:var(--faint);
+  display:inline-block;
+  min-width:36px;
+}
+.perf-value{color:var(--muted)}
 .hud-title{
   margin:0 0 7px;
   font-family:"Songti SC","STSong","Noto Serif CJK SC",serif;
@@ -186,6 +202,7 @@ body{
   .hud-top{top:12px;left:12px}
   .hud-bottom{left:12px;bottom:12px}
   .hud-right{right:12px;bottom:12px}
+  .hud-perf{top:12px;right:12px}
   .hud-title{font-size:16px}
 }
 @media (prefers-reduced-motion:reduce){
@@ -203,6 +220,14 @@ body{
   <div class="hud-row"><span class="hud-key">朝向</span><span class="hud-value" id="facing">南</span></div>
   <div class="hud-row"><span class="hud-key">探索</span><span class="hud-value" id="exploration">0%</span></div>
 </div>
+
+<div class="hud hud-perf" aria-hidden="true">
+  <div class="perf-line"><span class="perf-label">FPS</span> <span class="perf-value" id="perf-fps">--</span></div>
+  <div class="perf-line"><span class="perf-label">AVG</span> <span class="perf-value" id="perf-avg">--</span></div>
+  <div class="perf-line"><span class="perf-label">P95</span> <span class="perf-value" id="perf-p95">--</span></div>
+  <div class="perf-line"><span class="perf-label">DRAW</span> <span class="perf-value" id="perf-draw">--</span></div>
+</div>
+<pre id="perf-report" hidden></pre>
 
 <div class="hud hud-bottom" aria-hidden="true">
   <div class="inspect">
@@ -305,11 +330,18 @@ const explorationEl=document.querySelector("#exploration");
 const inspectNameEl=document.querySelector("#inspect-name");
 const inspectCoordEl=document.querySelector("#inspect-coord");
 const zoomFlash=document.querySelector("#zoom-flash");
+const perfFpsEl=document.querySelector("#perf-fps");
+const perfAvgEl=document.querySelector("#perf-avg");
+const perfP95El=document.querySelector("#perf-p95");
+const perfDrawEl=document.querySelector("#perf-draw");
+const perfReportEl=document.querySelector("#perf-report");
 const pointer=document.querySelector("#pointer");
 const pointerShape=document.querySelector("#pointer-shape");
 const finePointer=matchMedia("(hover: hover) and (pointer: fine)");
 const reduceMotion=matchMedia("(prefers-reduced-motion: reduce)");
-const visualCheck=new URLSearchParams(location.search).has("visual-check");
+const query=new URLSearchParams(location.search);
+const visualCheck=query.has("visual-check");
+const perfCheck=query.has("perf-check");
 
 const MAP_W=36;
 const MAP_H=28;
@@ -328,6 +360,9 @@ const FOG_PULSE_MAX_MS=6800;
 const FOG_CELL_PULSE_AMPLITUDE=.016;
 const FOG_BLOCK_PULSE_AMPLITUDE=.028;
 const FOG_GLITCH_VARIANCE=.045;
+const PERF_UPDATE_MS=250;
+const PERF_SAMPLE_LIMIT=240;
+const PERF_SLOW_FRAME_MS=20;
 
 const TILE_INFO={
   grass:{name:"草地",walkable:true},
@@ -418,7 +453,77 @@ let cssWidth=innerWidth;
 let cssHeight=innerHeight;
 let dpr=Math.min(devicePixelRatio||1,2);
 
+const perfState={
+  startedAt:performance.now(),
+  lastFrameAt:null,
+  lastHudAt:0,
+  frameTimes:[],
+  drawTimes:[]
+};
+
 function clamp(value,min,max){return Math.min(max,Math.max(min,value))}
+
+function pushPerfSample(list,value){
+  list.push(value);
+  if(list.length>PERF_SAMPLE_LIMIT)list.shift();
+}
+
+function average(values){
+  if(!values.length)return 0;
+  return values.reduce((sum,value)=>sum+value,0)/values.length;
+}
+
+function percentile(values,p){
+  if(!values.length)return 0;
+  const sorted=[...values].sort((a,b)=>a-b);
+  const index=Math.min(sorted.length-1,Math.max(0,Math.ceil(sorted.length*p)-1));
+  return sorted[index];
+}
+
+function performanceSummary(now=performance.now()){
+  const frames=perfState.frameTimes;
+  const draws=perfState.drawTimes;
+  const recent=frames.slice(-30);
+  const currentFrameMs=average(recent);
+  const avgFrameMs=average(frames);
+  const avgDrawMs=average(draws);
+  const slowFrames=frames.filter(value=>value>PERF_SLOW_FRAME_MS).length;
+
+  return {
+    elapsedMs:Math.round(now-perfState.startedAt),
+    samples:frames.length,
+    fps:Number((currentFrameMs?1000/currentFrameMs:0).toFixed(1)),
+    avgFps:Number((avgFrameMs?1000/avgFrameMs:0).toFixed(1)),
+    avgFrameMs:Number(avgFrameMs.toFixed(2)),
+    p95FrameMs:Number(percentile(frames,.95).toFixed(2)),
+    avgDrawMs:Number(avgDrawMs.toFixed(2)),
+    p95DrawMs:Number(percentile(draws,.95).toFixed(2)),
+    slowFramePct:Number((frames.length?slowFrames/frames.length*100:0).toFixed(1)),
+    viewport:`${cssWidth}x${cssHeight}@${dpr}`,
+    dynamicCheck:perfCheck
+  };
+}
+
+function updatePerformanceHud(now,drawMs){
+  if(perfState.lastFrameAt!==null){
+    const frameMs=now-perfState.lastFrameAt;
+    if(frameMs>0&&frameMs<250)pushPerfSample(perfState.frameTimes,frameMs);
+  }
+  perfState.lastFrameAt=now;
+  pushPerfSample(perfState.drawTimes,drawMs);
+
+  if(now-perfState.lastHudAt<PERF_UPDATE_MS)return;
+  perfState.lastHudAt=now;
+
+  const summary=performanceSummary(now);
+  perfFpsEl.textContent=summary.samples?summary.fps.toFixed(1):"--";
+  perfAvgEl.textContent=summary.samples?summary.avgFps.toFixed(1):"--";
+  perfP95El.textContent=summary.samples?`${summary.p95FrameMs.toFixed(1)}ms`:"--";
+  perfDrawEl.textContent=summary.samples?`${summary.avgDrawMs.toFixed(1)}ms`:"--";
+
+  perfReportEl.textContent=JSON.stringify(summary);
+  window.__APPRENTICE_PERF__=summary;
+}
 
 function cubicBezier(x1,y1,x2,y2){
   const cx=3*x1;
@@ -1064,7 +1169,10 @@ function tick(now){
   camera.y+=(targetCameraY-camera.y)*.18;
 
   updateFogTransition(now);
+  const drawStarted=performance.now();
   drawMap(now);
+  const drawMs=performance.now()-drawStarted;
+  updatePerformanceHud(now,drawMs);
   requestAnimationFrame(tick);
 }
 
@@ -1097,6 +1205,16 @@ if(visualCheck){
   pointer.style.top="42%";
   pointer.dataset.visible="true";
   inspectTile={x:21,y:15};
+}
+
+if(perfCheck){
+  let perfDirection=-1;
+  setInterval(()=>{
+    if(player.moving)return;
+    if(player.y<=14)perfDirection=1;
+    if(player.y>=18)perfDirection=-1;
+    directionStep(0,perfDirection);
+  },260);
 }
 
 updateHud();
