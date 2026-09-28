@@ -193,6 +193,7 @@ body{
   <h1 class="hud-title">青苔村外</h1>
   <div class="hud-row"><span class="hud-key">位置</span><span class="hud-value" id="coord">12, 16</span></div>
   <div class="hud-row"><span class="hud-key">朝向</span><span class="hud-value" id="facing">南</span></div>
+  <div class="hud-row"><span class="hud-key">探索</span><span class="hud-value" id="exploration">0%</span></div>
 </div>
 
 <div class="hud hud-bottom" aria-hidden="true">
@@ -292,6 +293,7 @@ const canvas=document.querySelector("#game");
 const ctx=canvas.getContext("2d");
 const coordEl=document.querySelector("#coord");
 const facingEl=document.querySelector("#facing");
+const explorationEl=document.querySelector("#exploration");
 const inspectNameEl=document.querySelector("#inspect-name");
 const inspectCoordEl=document.querySelector("#inspect-coord");
 const zoomFlash=document.querySelector("#zoom-flash");
@@ -307,6 +309,10 @@ const BASE_TILE=40;
 const ZOOM_MIN=.72;
 const ZOOM_MAX=1.65;
 const MOVE_MS=reduceMotion.matches?0:115;
+const VISION_CLEAR_RADIUS=4.25;
+const VISION_MAX_RADIUS=6.25;
+const FOG_SEEN_ALPHA=.64;
+const FOG_GLITCH_CELLS=8;
 
 const TILE_INFO={
   grass:{name:"草地",walkable:true},
@@ -379,6 +385,10 @@ const player={
   path:[]
 };
 
+const discovered=Array.from({length:MAP_H},()=>Array(MAP_W).fill(false));
+const vision=Array.from({length:MAP_H},()=>Array(MAP_W).fill(0));
+const OPAQUE_TILES=new Set(["tree","stone","house","shrine"]);
+
 const camera={x:player.x+.5,y:player.y+.5};
 let zoom=1;
 let targetZoom=1;
@@ -415,6 +425,60 @@ function tileAt(x,y){
 
 function canWalk(x,y){
   return TILE_INFO[tileAt(x,y)]?.walkable===true;
+}
+
+function blocksVision(x,y){
+  return OPAQUE_TILES.has(tileAt(x,y));
+}
+
+function hasLineOfSight(ox,oy,tx,ty){
+  if(ox===tx&&oy===ty)return true;
+
+  let x=ox;
+  let y=oy;
+  const dx=Math.abs(tx-ox);
+  const dy=Math.abs(ty-oy);
+  const sx=ox<tx?1:-1;
+  const sy=oy<ty?1:-1;
+  let err=dx-dy;
+
+  while(!(x===tx&&y===ty)){
+    const twice=err*2;
+    if(twice>-dy){err-=dy;x+=sx}
+    if(twice<dx){err+=dx;y+=sy}
+
+    if(x===tx&&y===ty)return true;
+    if(blocksVision(x,y))return false;
+  }
+
+  return true;
+}
+
+function updateVision(){
+  for(let y=0;y<MAP_H;y++){
+    vision[y].fill(0);
+  }
+
+  const reach=Math.ceil(VISION_MAX_RADIUS);
+  for(let y=Math.max(0,player.y-reach);y<=Math.min(MAP_H-1,player.y+reach);y++){
+    for(let x=Math.max(0,player.x-reach);x<=Math.min(MAP_W-1,player.x+reach);x++){
+      const distance=Math.hypot(x-player.x,y-player.y);
+      if(distance>VISION_MAX_RADIUS||!hasLineOfSight(player.x,player.y,x,y))continue;
+
+      let strength=1;
+      if(distance>VISION_CLEAR_RADIUS){
+        strength=1-(distance-VISION_CLEAR_RADIUS)/(VISION_MAX_RADIUS-VISION_CLEAR_RADIUS);
+      }
+
+      strength=clamp(strength,0,1);
+      vision[y][x]=strength;
+      if(strength>.015)discovered[y][x]=true;
+    }
+  }
+}
+
+function isDiscovered(x,y){
+  return x>=0&&y>=0&&x<MAP_W&&y<MAP_H&&discovered[y][x];
 }
 
 function screenToTile(clientX,clientY){
@@ -588,6 +652,62 @@ function drawMap(){
 
   drawInspect(s);
   drawPlayer(s);
+  drawFog(s,minX,maxX,minY,maxY);
+}
+
+function drawFog(s,minX,maxX,minY,maxY){
+  ctx.save();
+
+  for(let y=minY;y<=maxY;y++){
+    for(let x=minX;x<=maxX;x++){
+      const p=tileToScreen(x,y);
+
+      if(!discovered[y][x]){
+        ctx.fillStyle="#000";
+        ctx.fillRect(Math.floor(p.x),Math.floor(p.y),Math.ceil(s)+1,Math.ceil(s)+1);
+        continue;
+      }
+
+      const strength=vision[y][x];
+      if(strength>=.999)continue;
+
+      if(strength<=.001){
+        ctx.fillStyle=`rgba(0,0,0,${FOG_SEEN_ALPHA})`;
+        ctx.fillRect(Math.floor(p.x),Math.floor(p.y),Math.ceil(s)+1,Math.ceil(s)+1);
+        continue;
+      }
+
+      const baseAlpha=FOG_SEEN_ALPHA*(1-strength);
+      ctx.fillStyle=`rgba(0,0,0,${baseAlpha*.42})`;
+      ctx.fillRect(Math.floor(p.x),Math.floor(p.y),Math.ceil(s)+1,Math.ceil(s)+1);
+
+      const cells=FOG_GLITCH_CELLS;
+      const cell=s/cells;
+      for(let gy=0;gy<cells;gy++){
+        for(let gx=0;gx<cells;gx++){
+          const noise=hash(x*cells+gx,y*cells+gy,71);
+          const phase=hash(x*cells+gx,y*cells+gy,113);
+          let alpha=baseAlpha+(noise-.5)*.18;
+          if(phase>.83)alpha-=.10;
+          if(phase<.12)alpha+=.13;
+          alpha=clamp(Math.round(alpha/.055)*.055,0,FOG_SEEN_ALPHA);
+          if(alpha<=.01)continue;
+
+          const stretch=hash(x*cells+gx,y*cells+gy,191)>.86?2:1;
+          const offset=hash(x*cells+gx,y*cells+gy,233)>.88?cell*.28:0;
+          ctx.fillStyle=`rgba(0,0,0,${alpha})`;
+          ctx.fillRect(
+            Math.floor(p.x+gx*cell+offset),
+            Math.floor(p.y+gy*cell),
+            Math.ceil(cell*stretch)+1,
+            Math.ceil(cell)+1
+          );
+        }
+      }
+    }
+  }
+
+  ctx.restore();
 }
 
 function drawInspect(s){
@@ -640,8 +760,19 @@ function drawPlayer(s){
 function updateHud(){
   coordEl.textContent=`${player.x}, ${player.y}`;
   facingEl.textContent=({north:"北",south:"南",west:"西",east:"东"})[player.facing];
+
+  let explored=0;
+  for(let y=0;y<MAP_H;y++){
+    for(let x=0;x<MAP_W;x++){
+      if(discovered[y][x])explored++;
+    }
+  }
+  explorationEl.textContent=Math.round(explored/(MAP_W*MAP_H)*100)+"%";
+
   if(inspectTile){
-    inspectNameEl.textContent=TILE_INFO[tileAt(inspectTile.x,inspectTile.y)].name;
+    inspectNameEl.textContent=isDiscovered(inspectTile.x,inspectTile.y)
+      ?TILE_INFO[tileAt(inspectTile.x,inspectTile.y)].name
+      :"未发现";
     inspectCoordEl.textContent=`${inspectTile.x}, ${inspectTile.y}`;
   }
 }
@@ -663,6 +794,7 @@ function startMove(nx,ny){
   player.toY=ny;
   player.x=nx;
   player.y=ny;
+  updateVision();
   player.moveStart=performance.now();
   player.moving=true;
   updateHud();
@@ -690,7 +822,7 @@ function directionStep(dx,dy){
 }
 
 function findPath(sx,sy,tx,ty){
-  if(!canWalk(tx,ty))return [];
+  if(!isDiscovered(tx,ty)||!canWalk(tx,ty))return [];
   const key=(x,y)=>y*MAP_W+x;
   const queue=[[sx,sy]];
   const prev=new Map();
@@ -702,7 +834,7 @@ function findPath(sx,sy,tx,ty){
     if(x===tx&&y===ty)break;
     for(const [dx,dy] of dirs){
       const nx=x+dx,ny=y+dy,k=key(nx,ny);
-      if(nx<0||ny<0||nx>=MAP_W||ny>=MAP_H||prev.has(k)||!canWalk(nx,ny))continue;
+      if(nx<0||ny<0||nx>=MAP_W||ny>=MAP_H||prev.has(k)||!isDiscovered(nx,ny)||!canWalk(nx,ny))continue;
       prev.set(k,[x,y]);
       queue.push([nx,ny]);
     }
@@ -833,6 +965,8 @@ document.documentElement.addEventListener("pointerleave",hidePointer);
 window.addEventListener("blur",hidePointer);
 window.addEventListener("pointerdown",wobblePointer);
 pointerShape.addEventListener("animationend",()=>pointerShape.classList.remove("is-wobbling"));
+
+updateVision();
 
 if(visualCheck){
   pointer.style.display="block";
