@@ -49,26 +49,52 @@ jobs:
 
           CHROME="${{ steps.chrome.outputs.chrome-path }}"
 
-          "$CHROME"             --headless=new             --disable-gpu             --no-sandbox             --hide-scrollbars             --window-size=800,500             --virtual-time-budget=3000             --screenshot=visual-check.png             "http://127.0.0.1:4173/?visual-check=1"
+          "$CHROME" \
+            --headless=new \
+            --disable-gpu \
+            --no-sandbox \
+            --hide-scrollbars \
+            --window-size=800,500 \
+            --virtual-time-budget=3000 \
+            --screenshot=visual-check.png \
+            "http://127.0.0.1:4173/?visual-check=1"
 
-          "$CHROME"             --headless=new             --disable-gpu             --no-sandbox             --hide-scrollbars             --window-size=800,500             --virtual-time-budget=8000             --dump-dom             "http://127.0.0.1:4173/?perf-check=1" > perf-dom.html
+          : > /tmp/apprentice-http.log
+          "$CHROME" \
+            --headless=new \
+            --disable-gpu \
+            --no-sandbox \
+            --hide-scrollbars \
+            --disable-background-timer-throttling \
+            --disable-renderer-backgrounding \
+            --disable-backgrounding-occluded-windows \
+            --remote-debugging-port=9222 \
+            --window-size=800,500 \
+            "http://127.0.0.1:4173/?perf-check=1" \
+            >/tmp/apprentice-chrome-perf.log 2>&1 &
+          CHROME_PID=$!
+
+          sleep 8
+          kill "$CHROME_PID" 2>/dev/null || true
+          wait "$CHROME_PID" 2>/dev/null || true
 
           python3 - <<'PY'
-          import html
           import json
           import re
+          from urllib.parse import parse_qs, urlsplit
 
-          source=open("perf-dom.html",encoding="utf-8").read()
-          match=re.search(r'<pre id="perf-report" hidden="">(.*?)</pre>',source,re.S)
-          if not match:
-              match=re.search(r'<pre id="perf-report" hidden>(.*?)</pre>',source,re.S)
-          if not match:
+          log=open("/tmp/apprentice-http.log",encoding="utf-8").read()
+          paths=re.findall(r'"GET (/__perf_report__\?[^ ]+) HTTP/',log)
+          if not paths:
+              print(open("/tmp/apprentice-chrome-perf.log",encoding="utf-8").read())
               raise SystemExit("performance report not found")
 
-          raw=html.unescape(match.group(1)).strip()
-          data=json.loads(raw)
+          query=parse_qs(urlsplit(paths[-1]).query)
+          data=json.loads(query["data"][0])
+
           with open("perf-check.json","w",encoding="utf-8") as output:
               json.dump(data,output,ensure_ascii=False,indent=2)
+
           print(json.dumps(data,ensure_ascii=False,indent=2))
           PY
 
