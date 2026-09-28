@@ -216,7 +216,7 @@ body{
 
 <div class="hud hud-top" aria-hidden="true">
   <h1 class="hud-title">青苔村外</h1>
-  <div class="hud-row"><span class="hud-key">位置</span><span class="hud-value" id="coord">12, 16</span></div>
+  <div class="hud-row"><span class="hud-key">位置</span><span class="hud-value" id="coord">12, 14</span></div>
   <div class="hud-row"><span class="hud-key">朝向</span><span class="hud-value" id="facing">南</span></div>
   <div class="hud-row"><span class="hud-key">探索</span><span class="hud-value" id="exploration">0%</span></div>
 </div>
@@ -551,12 +551,12 @@ function buildMap(){
 buildMap();
 
 const player={
-  x:12,y:16,
-  renderX:12,renderY:16,
+  x:12,y:14,
+  renderX:12,renderY:14,
   facing:"south",
   moving:false,
-  fromX:12,fromY:16,
-  toX:12,toY:16,
+  fromX:12,fromY:14,
+  toX:12,toY:14,
   moveStart:0,
   path:[]
 };
@@ -941,9 +941,6 @@ function drawGroundTile(type,x,y,s,target=ctx,tileX=0,tileY=0){
   }
 
   if(type==="mud"||type==="path"||type==="puddle"){
-    target.fillStyle=type==="path"?"#756652":"#625b4d";
-    target.fillRect(px,py,Math.ceil(s)+1,Math.ceil(s)+1);
-
     const left=tileAt(tileX-1,tileY);
     const right=tileAt(tileX+1,tileY);
     const up=tileAt(tileX,tileY-1);
@@ -953,10 +950,40 @@ function drawGroundTile(type,x,y,s,target=ctx,tileX=0,tileY=0){
     const vertical=roadish(up)||roadish(down);
 
     if(type==="path"){
-      target.strokeStyle="rgba(45,38,31,.25)";
-      target.lineWidth=Math.max(1,s*.035);
+      // Underpaint the road tile with ground, then draw only the travelled corridor.
+      target.fillStyle=seed>.52?"#687255":"#737158";
+      target.fillRect(px,py,Math.ceil(s)+1,Math.ceil(s)+1);
+
+      target.fillStyle="#756652";
       if(horizontal){
-        for(const yy of [.36,.66]){
+        target.fillRect(x-s*.02,y+s*.16,s*1.04,s*.68);
+        target.fillStyle="rgba(55,47,39,.13)";
+        target.fillRect(x-s*.02,y+s*.16,s*1.04,s*.055);
+        target.fillRect(x-s*.02,y+s*.785,s*1.04,s*.055);
+        target.fillStyle="#756652";
+      }
+      if(vertical){
+        target.fillRect(x+s*.16,y-s*.02,s*.68,s*1.04);
+        target.fillStyle="rgba(55,47,39,.13)";
+        target.fillRect(x+s*.16,y-s*.02,s*.055,s*1.04);
+        target.fillRect(x+s*.785,y-s*.02,s*.055,s*1.04);
+        target.fillStyle="#756652";
+      }
+      if(!horizontal&&!vertical){
+        target.fillRect(x+s*.16,y+s*.16,s*.68,s*.68);
+      }
+
+      // Pixel-cut shoulders break the rectangular silhouette.
+      target.fillStyle=seed>.5?"#687255":"#737158";
+      if(hash(tileX,tileY,704)>.5)target.fillRect(x,y,s*.13,s*.20);
+      if(hash(tileX,tileY,705)>.5)target.fillRect(x+s*.87,y+s*.80,s*.13,s*.20);
+      if(hash(tileX,tileY,706)>.62)target.fillRect(x+s*.82,y,s*.18,s*.12);
+      if(hash(tileX,tileY,707)>.62)target.fillRect(x,y+s*.86,s*.18,s*.14);
+
+      target.strokeStyle="rgba(45,38,31,.27)";
+      target.lineWidth=Math.max(1,s*.032);
+      if(horizontal){
+        for(const yy of [.37,.64]){
           target.beginPath();
           target.moveTo(x-s*.04,y+s*yy);
           target.bezierCurveTo(
@@ -968,7 +995,7 @@ function drawGroundTile(type,x,y,s,target=ctx,tileX=0,tileY=0){
         }
       }
       if(vertical){
-        for(const xx of [.36,.66]){
+        for(const xx of [.37,.64]){
           target.beginPath();
           target.moveTo(x+s*xx,y-s*.04);
           target.bezierCurveTo(
@@ -979,6 +1006,9 @@ function drawGroundTile(type,x,y,s,target=ctx,tileX=0,tileY=0){
           target.stroke();
         }
       }
+    }else{
+      target.fillStyle="#625b4d";
+      target.fillRect(px,py,Math.ceil(s)+1,Math.ceil(s)+1);
     }
 
     target.fillStyle="rgba(36,31,26,.12)";
@@ -1618,7 +1648,7 @@ if(visualCheck){
   pointer.style.left="64%";
   pointer.style.top="42%";
   pointer.dataset.visible="true";
-  inspectTile={x:21,y:15};
+  inspectTile={x:9,y:10};
 }
 
 if(perfCheck){
