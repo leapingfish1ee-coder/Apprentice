@@ -31,16 +31,36 @@ body{
   pointer-events:none;
   opacity:0;
   transform:translate3d(-2.8px,-2.5px,0);
-  transform-origin:2.8px 2.5px;
-  scale:1;
-  will-change:transform,opacity,scale;
-  transition:
-    opacity 90ms ease-out,
-    scale 90ms cubic-bezier(.23,1,.32,1);
+  will-change:transform,opacity;
+  transition:opacity 50ms cubic-bezier(.4,0,1,1);
 }
 
-.pointer[data-visible="true"]{opacity:1}
-.pointer[data-pressed="true"]{scale:.92}
+.pointer[data-visible="true"]{
+  opacity:1;
+  transition-duration:70ms;
+  transition-timing-function:cubic-bezier(.23,1,.32,1);
+}
+
+.pointer-shape{
+  display:block;
+  width:100%;
+  height:100%;
+  transform-origin:2.8px 2.5px;
+  will-change:transform;
+}
+
+.pointer-shape.is-wobbling{
+  animation:pointer-wobble 150ms cubic-bezier(.23,1,.32,1);
+}
+
+@keyframes pointer-wobble{
+  0%{transform:rotate(0deg)}
+  22%{transform:rotate(-8deg)}
+  47%{transform:rotate(6deg)}
+  70%{transform:rotate(-3.5deg)}
+  86%{transform:rotate(1.5deg)}
+  100%{transform:rotate(0deg)}
+}
 
 .pointer svg{
   display:block;
@@ -63,11 +83,13 @@ body{
 
 @media (prefers-reduced-motion:reduce){
   .pointer{transition:none}
+  .pointer-shape.is-wobbling{animation:none}
 }
 </style>
 </head>
 <body>
 <div class="pointer" id="pointer" aria-hidden="true">
+  <span class="pointer-shape" id="pointer-shape">
   <svg viewBox="0 0 32 32" role="presentation" focusable="false">
     <!--
       Wood texture: Poly Haven / Fine Grained Wood / CC0
@@ -233,10 +255,12 @@ body{
       stroke-linecap="round"
     />
   </svg>
+  </span>
 </div>
 
 <script>
 const pointer=document.querySelector("#pointer");
+const pointerShape=document.querySelector("#pointer-shape");
 const finePointer=matchMedia("(hover: hover) and (pointer: fine)");
 const visualCheck=new URLSearchParams(location.search).has("visual-check");
 
@@ -256,17 +280,23 @@ function movePointer(event){
 
 window.addEventListener("pointermove",movePointer,{passive:true});
 window.addEventListener("pointerenter",movePointer,{passive:true});
-window.addEventListener("pointerleave",()=>{
+function hidePointer(){
   pointer.dataset.visible="false";
-});
-window.addEventListener("pointerdown",()=>{
-  if(finePointer.matches)pointer.dataset.pressed="true";
-});
-window.addEventListener("pointerup",()=>{
-  pointer.dataset.pressed="false";
-});
-window.addEventListener("pointercancel",()=>{
-  pointer.dataset.pressed="false";
+}
+
+function wobblePointer(){
+  if(!finePointer.matches||matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+  pointerShape.classList.remove("is-wobbling");
+  void pointerShape.offsetWidth;
+  pointerShape.classList.add("is-wobbling");
+}
+
+document.documentElement.addEventListener("pointerleave",hidePointer);
+window.addEventListener("blur",hidePointer);
+window.addEventListener("pointerdown",wobblePointer);
+
+pointerShape.addEventListener("animationend",()=>{
+  pointerShape.classList.remove("is-wobbling");
 });
 </script>
 </body>
