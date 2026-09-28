@@ -26,20 +26,21 @@ body{
   top:0;
   left:0;
   z-index:9999;
-  width:22px;
+  width:24px;
   height:26px;
   pointer-events:none;
   opacity:0;
-  transform:translate3d(-50%,0,0) scale(1);
-  transform-origin:50% 8%;
-  will-change:transform,opacity;
+  transform:translate3d(-2.4px,-1.8px,0);
+  transform-origin:2.4px 1.8px;
+  scale:1;
+  will-change:transform,opacity,scale;
   transition:
     opacity 90ms ease-out,
-    scale 90ms ease-out;
+    scale 90ms cubic-bezier(.23,1,.32,1);
 }
 
 .pointer[data-visible="true"]{opacity:1}
-.pointer[data-pressed="true"]{scale:.9}
+.pointer[data-pressed="true"]{scale:.92}
 
 .pointer svg{
   display:block;
@@ -64,16 +65,16 @@ body{
 </head>
 <body>
 <div class="pointer" id="pointer" aria-hidden="true">
-  <svg viewBox="0 0 22 26" role="presentation" focusable="false">
+  <svg viewBox="0 0 24 26" role="presentation" focusable="false">
     <path
-      d="M11 1.25
-         C11.7 1.25 12.25 1.68 12.58 2.37
-         L20.45 19.25
-         C20.93 20.28 20.2 21.45 19.05 21.45
-         L2.95 21.45
-         C1.8 21.45 1.07 20.28 1.55 19.25
-         L9.42 2.37
-         C9.75 1.68 10.3 1.25 11 1.25
+      d="M3.18 1.34
+         C2.34 1.14 1.55 1.88 1.71 2.77
+         L5.48 23.20
+         C5.67 24.24 6.88 24.67 7.67 23.96
+         L21.03 18.91
+         C21.99 18.55 22.20 17.29 21.37 16.70
+         L4.65 1.78
+         C4.24 1.46 3.69 1.27 3.18 1.34
          Z"
       fill="#fff"
     />
