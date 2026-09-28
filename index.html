@@ -1774,11 +1774,26 @@ updateVision({animate:true});
 updateFogTexture(performance.now(),true);
 
 if(visualCheck){
+  player.x=7;
+  player.y=7;
+  player.renderX=7;
+  player.renderY=7;
+  player.fromX=7;
+  player.fromY=7;
+  player.toX=7;
+  player.toY=7;
+  player.moving=false;
+  player.path.length=0;
+  camera.x=7.5;
+  camera.y=7.5;
+  inspectTile={x:8,y:8};
+  updateVision({animate:false});
+  updateHud();
+
   pointer.style.display="block";
   pointer.style.left="64%";
   pointer.style.top="42%";
   pointer.dataset.visible="true";
-  inspectTile={x:8,y:10};
 }
 
 if(perfCheck){
