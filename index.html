@@ -2,25 +2,126 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <meta name="color-scheme" content="light">
 <title>Apprentice</title>
 <style>
+:root{
+  --canvas:#f2efe6;
+  --ink:#3d372f;
+  --muted:#756d61;
+  --faint:#a69c8e;
+  --line:rgba(61,55,47,.18);
+  --paper:rgba(242,239,230,.88);
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+}
 *{box-sizing:border-box}
-
-html,
-body{
+html,body{
   margin:0;
   width:100%;
-  min-height:100%;
-  background:#f2efe6;
-}
-
-body{
-  min-height:100vh;
+  height:100%;
   overflow:hidden;
+  overscroll-behavior:none;
+  background:var(--canvas);
 }
-
+body{
+  position:relative;
+  color:var(--ink);
+  font-family:var(--font);
+  user-select:none;
+  -webkit-user-select:none;
+  touch-action:none;
+}
+#game{
+  position:fixed;
+  inset:0;
+  display:block;
+  width:100%;
+  height:100%;
+  background:var(--canvas);
+  image-rendering:auto;
+}
+.hud{
+  position:fixed;
+  z-index:20;
+  pointer-events:none;
+  color:var(--ink);
+  font-size:11px;
+  letter-spacing:.04em;
+}
+.hud-top{
+  top:16px;
+  left:18px;
+  min-width:186px;
+}
+.hud-bottom{
+  left:18px;
+  bottom:16px;
+  max-width:min(460px,calc(100vw - 36px));
+}
+.hud-right{
+  right:18px;
+  bottom:16px;
+  text-align:right;
+}
+.hud-title{
+  margin:0 0 7px;
+  font-family:"Songti SC","STSong","Noto Serif CJK SC",serif;
+  font-size:18px;
+  font-weight:600;
+  letter-spacing:.12em;
+}
+.hud-row{
+  display:flex;
+  align-items:baseline;
+  gap:12px;
+  min-height:20px;
+}
+.hud-key{
+  color:var(--faint);
+  min-width:34px;
+}
+.hud-value{
+  color:var(--muted);
+  font-variant-numeric:tabular-nums;
+}
+.inspect{
+  display:grid;
+  grid-template-columns:auto 1fr;
+  gap:4px 12px;
+  padding-top:9px;
+  border-top:1px solid var(--line);
+}
+.inspect-label{color:var(--faint)}
+.inspect-value{color:var(--muted)}
+.hint{
+  color:var(--faint);
+  font-size:10px;
+  line-height:1.8;
+  letter-spacing:.05em;
+}
+.zoom-flash{
+  position:fixed;
+  z-index:21;
+  left:50%;
+  top:18px;
+  translate:-50% 0;
+  padding:6px 9px;
+  color:var(--muted);
+  background:var(--paper);
+  border:1px solid var(--line);
+  font-size:10px;
+  font-variant-numeric:tabular-nums;
+  letter-spacing:.08em;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity 100ms ease-out,transform 120ms cubic-bezier(.23,1,.32,1);
+  transform:translateY(-3px);
+}
+.zoom-flash[data-visible="true"]{
+  opacity:1;
+  transform:translateY(0);
+}
 .pointer{
   position:fixed;
   top:0;
@@ -34,13 +135,11 @@ body{
   will-change:transform,opacity;
   transition:opacity 50ms cubic-bezier(.4,0,1,1);
 }
-
 .pointer[data-visible="true"]{
   opacity:1;
   transition-duration:70ms;
   transition-timing-function:cubic-bezier(.23,1,.32,1);
 }
-
 .pointer-shape{
   display:block;
   width:100%;
@@ -48,11 +147,9 @@ body{
   transform-origin:2.8px 2.5px;
   will-change:transform;
 }
-
 .pointer-shape.is-wobbling{
   animation:pointer-wobble 150ms cubic-bezier(.23,1,.32,1);
 }
-
 @keyframes pointer-wobble{
   0%{transform:rotate(0deg)}
   22%{transform:rotate(-4.5deg)}
@@ -61,7 +158,6 @@ body{
   86%{transform:rotate(.8deg)}
   100%{transform:rotate(0deg)}
 }
-
 .pointer svg{
   display:block;
   width:100%;
@@ -71,67 +167,76 @@ body{
     drop-shadow(0 1px .7px rgba(92,62,41,.20))
     drop-shadow(0 2px 2px rgba(92,62,41,.05));
 }
-
 @media (hover:hover) and (pointer:fine){
-  html,
-  body{cursor:none}
+  html,body,#game{cursor:none}
 }
-
 @media (hover:none),(pointer:coarse){
   .pointer{display:none}
+  .hint{display:none}
 }
-
+@media (max-width:640px){
+  .hud-top{top:12px;left:12px}
+  .hud-bottom{left:12px;bottom:12px}
+  .hud-right{right:12px;bottom:12px}
+  .hud-title{font-size:16px}
+}
 @media (prefers-reduced-motion:reduce){
-  .pointer{transition:none}
+  .pointer,.zoom-flash{transition:none}
   .pointer-shape.is-wobbling{animation:none}
 }
 </style>
 </head>
 <body>
+<canvas id="game" aria-label="俯视格子地图"></canvas>
+
+<div class="hud hud-top" aria-hidden="true">
+  <h1 class="hud-title">青苔村外</h1>
+  <div class="hud-row"><span class="hud-key">位置</span><span class="hud-value" id="coord">12, 16</span></div>
+  <div class="hud-row"><span class="hud-key">朝向</span><span class="hud-value" id="facing">南</span></div>
+</div>
+
+<div class="hud hud-bottom" aria-hidden="true">
+  <div class="inspect">
+    <span class="inspect-label">查看</span><span class="inspect-value" id="inspect-name">草地</span>
+    <span class="inspect-label">坐标</span><span class="inspect-value" id="inspect-coord">—</span>
+  </div>
+</div>
+
+<div class="hud hud-right hint" aria-hidden="true">
+  WASD / 方向键　移动<br>
+  左键　寻路　·　右键　查看<br>
+  滚轮　缩放镜头
+</div>
+
+<div class="zoom-flash" id="zoom-flash" aria-hidden="true">100%</div>
+
 <div class="pointer" id="pointer" aria-hidden="true">
   <span class="pointer-shape" id="pointer-shape">
   <svg viewBox="0 0 32 32" role="presentation" focusable="false">
-    <!--
-      Wood texture: Poly Haven / Fine Grained Wood / CC0
-      https://polyhaven.com/a/fine_grained_wood
-    -->
     <defs>
       <path id="tenonShape"
-        d="M4.50 1.65
-           C3.18 1.31 2.02 2.18 1.98 3.48
-           L3.80 21.76
-           C3.96 23.44 4.95 24.84 6.50 25.50
-           L21.64 29.48
-           C23.38 29.93 25.17 29.13 25.97 27.52
-           L29.72 19.68
-           C30.41 18.25 30.10 16.52 28.91 15.47
-           L6.30 2.32
-           C5.78 2.01 5.09 1.77 4.50 1.65
-           Z"/>
-
-      <clipPath id="tenonClip">
-        <use href="#tenonShape"/>
-      </clipPath>
-
+        d="M4.50 1.65 C3.18 1.31 2.02 2.18 1.98 3.48
+           L3.80 21.76 C3.96 23.44 4.95 24.84 6.50 25.50
+           L21.64 29.48 C23.38 29.93 25.17 29.13 25.97 27.52
+           L29.72 19.68 C30.41 18.25 30.10 16.52 28.91 15.47
+           L6.30 2.32 C5.78 2.01 5.09 1.77 4.50 1.65 Z"/>
+      <clipPath id="tenonClip"><use href="#tenonShape"/></clipPath>
       <linearGradient id="warmTint" x1="2" y1="2" x2="29" y2="29" gradientUnits="userSpaceOnUse">
         <stop offset="0" stop-color="#ffe0b0" stop-opacity=".62"/>
         <stop offset=".28" stop-color="#e2ac77" stop-opacity=".34"/>
         <stop offset=".62" stop-color="#a66f48" stop-opacity=".05"/>
         <stop offset="1" stop-color="#805139" stop-opacity=".10"/>
       </linearGradient>
-
       <linearGradient id="chamferTop" x1="2" y1="2" x2="18" y2="18" gradientUnits="userSpaceOnUse">
         <stop offset="0" stop-color="#fff1d2" stop-opacity=".72"/>
         <stop offset=".42" stop-color="#eabf88" stop-opacity=".24"/>
         <stop offset="1" stop-color="#7a4d2f" stop-opacity="0"/>
       </linearGradient>
-
       <linearGradient id="chamferDark" x1="8" y1="8" x2="29" y2="29" gradientUnits="userSpaceOnUse">
         <stop offset=".38" stop-color="#6f4932" stop-opacity="0"/>
         <stop offset=".76" stop-color="#7d5136" stop-opacity=".07"/>
         <stop offset="1" stop-color="#5b3926" stop-opacity=".18"/>
       </linearGradient>
-
       <filter id="textureLift" x="-10%" y="-10%" width="120%" height="120%">
         <feComponentTransfer>
           <feFuncR type="linear" slope=".78" intercept=".22"/>
@@ -139,136 +244,573 @@ body{
           <feFuncB type="linear" slope=".82" intercept=".14"/>
         </feComponentTransfer>
       </filter>
-
       <filter id="microRelief" x="-15%" y="-15%" width="130%" height="130%">
         <feTurbulence type="fractalNoise" baseFrequency=".16 .52" numOctaves="2" seed="9" result="grain"/>
-        <feColorMatrix
-          in="grain"
-          type="matrix"
-          values="
-            .18 0 0 0 .06
-            .08 0 0 0 .02
-            .03 0 0 0 .01
-            0 0 0 .16 0"
+        <feColorMatrix in="grain" type="matrix"
+          values=".18 0 0 0 .06 .08 0 0 0 .02 .03 0 0 0 .01 0 0 0 .16 0"
           result="grainTint"/>
         <feBlend in="SourceGraphic" in2="grainTint" mode="multiply"/>
       </filter>
     </defs>
-
     <g clip-path="url(#tenonClip)">
       <rect width="32" height="32" fill="#bd8357"/>
-
       <image
         href="https://cdn.polyhaven.com/asset_img/thumbs/fine_grained_wood.png?height=256&amp;quality=95"
-        x="-8"
-        y="-4"
-        width="54"
-        height="40"
+        x="-8" y="-4" width="54" height="40"
         preserveAspectRatio="xMidYMid slice"
-        opacity=".72"
-        filter="url(#textureLift)"
+        opacity=".72" filter="url(#textureLift)"
         transform="rotate(27 16 16)"
       />
-
       <rect width="32" height="32" fill="url(#warmTint)"/>
       <rect width="32" height="32" fill="url(#chamferTop)"/>
       <rect width="32" height="32" fill="url(#chamferDark)"/>
       <rect width="32" height="32" filter="url(#microRelief)" opacity=".16"/>
-
-      <path
-        d="M1.6 8.0 C7.1 6.2 12.8 8.3 18.2 10.7 S27 13.3 32 11.4"
-        fill="none"
-        stroke="#f0c893"
-        stroke-opacity=".22"
-        stroke-width=".62"
-        stroke-linecap="round"
-      />
-      <path
-        d="M1.0 14.6 C6.9 12.7 12.3 15.4 18.0 17.0 S26.0 20.0 31.4 18.1"
-        fill="none"
-        stroke="#795036"
-        stroke-opacity=".22"
-        stroke-width=".70"
-        stroke-linecap="round"
-      />
-      <path
-        d="M2.7 21.5 C8.5 19.7 13.7 22.0 19.2 23.8 S25.6 26.3 29.0 25.4"
-        fill="none"
-        stroke="#e0aa70"
-        stroke-opacity=".20"
-        stroke-width=".58"
-        stroke-linecap="round"
-      />
-
-      <ellipse
-        cx="19.9"
-        cy="18.9"
-        rx="3.8"
-        ry="2.3"
-        transform="rotate(27 19.9 18.9)"
-        fill="#734a31"
-        fill-opacity=".12"
-      />
-      <ellipse
-        cx="19.9"
-        cy="18.9"
-        rx="2.15"
-        ry="1.18"
-        transform="rotate(27 19.9 18.9)"
-        fill="none"
-        stroke="#e4ad73"
-        stroke-opacity=".20"
-        stroke-width=".50"
-      />
+      <path d="M1.6 8 C7.1 6.2 12.8 8.3 18.2 10.7 S27 13.3 32 11.4"
+        fill="none" stroke="#f0c893" stroke-opacity=".22" stroke-width=".62" stroke-linecap="round"/>
+      <path d="M1 14.6 C6.9 12.7 12.3 15.4 18 17 S26 20 31.4 18.1"
+        fill="none" stroke="#795036" stroke-opacity=".22" stroke-width=".70" stroke-linecap="round"/>
+      <path d="M2.7 21.5 C8.5 19.7 13.7 22 19.2 23.8 S25.6 26.3 29 25.4"
+        fill="none" stroke="#e0aa70" stroke-opacity=".20" stroke-width=".58" stroke-linecap="round"/>
+      <ellipse cx="19.9" cy="18.9" rx="3.8" ry="2.3" transform="rotate(27 19.9 18.9)"
+        fill="#734a31" fill-opacity=".12"/>
+      <ellipse cx="19.9" cy="18.9" rx="2.15" ry="1.18" transform="rotate(27 19.9 18.9)"
+        fill="none" stroke="#e4ad73" stroke-opacity=".20" stroke-width=".50"/>
     </g>
-
-    <use
-      href="#tenonShape"
-      fill="none"
-      stroke="#765039"
-      stroke-width=".84"
-      stroke-linejoin="round"
-    />
-
-    <path
-      d="M4.72 2.77
-         C3.93 2.57 3.24 3.10 3.24 3.91
-         L4.86 20.98
-         C4.96 22.07 5.64 22.94 6.63 23.40
-         L21.02 27.20"
-      fill="none"
-      stroke="#f1cc98"
-      stroke-opacity=".48"
-      stroke-width=".62"
-      stroke-linecap="round"
-    />
-
-    <path
-      d="M27.88 16.54
-         C28.58 17.18 28.75 18.13 28.32 19.03
-         L24.64 26.73
-         C24.21 27.60 23.31 28.05 22.35 27.81"
-      fill="none"
-      stroke="#65432f"
-      stroke-opacity=".34"
-      stroke-width=".72"
-      stroke-linecap="round"
-    />
+    <use href="#tenonShape" fill="none" stroke="#765039" stroke-width=".84" stroke-linejoin="round"/>
+    <path d="M4.72 2.77 C3.93 2.57 3.24 3.10 3.24 3.91
+             L4.86 20.98 C4.96 22.07 5.64 22.94 6.63 23.40 L21.02 27.20"
+      fill="none" stroke="#f1cc98" stroke-opacity=".48" stroke-width=".62" stroke-linecap="round"/>
+    <path d="M27.88 16.54 C28.58 17.18 28.75 18.13 28.32 19.03
+             L24.64 26.73 C24.21 27.60 23.31 28.05 22.35 27.81"
+      fill="none" stroke="#65432f" stroke-opacity=".34" stroke-width=".72" stroke-linecap="round"/>
   </svg>
   </span>
 </div>
 
 <script>
+const canvas=document.querySelector("#game");
+const ctx=canvas.getContext("2d");
+const coordEl=document.querySelector("#coord");
+const facingEl=document.querySelector("#facing");
+const inspectNameEl=document.querySelector("#inspect-name");
+const inspectCoordEl=document.querySelector("#inspect-coord");
+const zoomFlash=document.querySelector("#zoom-flash");
 const pointer=document.querySelector("#pointer");
 const pointerShape=document.querySelector("#pointer-shape");
 const finePointer=matchMedia("(hover: hover) and (pointer: fine)");
+const reduceMotion=matchMedia("(prefers-reduced-motion: reduce)");
 const visualCheck=new URLSearchParams(location.search).has("visual-check");
 
-if(visualCheck){
-  pointer.style.display="block";
-  pointer.style.left="50%";
-  pointer.style.top="50%";
-  pointer.dataset.visible="true";
+const MAP_W=36;
+const MAP_H=28;
+const BASE_TILE=40;
+const ZOOM_MIN=.72;
+const ZOOM_MAX=1.65;
+const MOVE_MS=reduceMotion.matches?0:115;
+
+const TILE_INFO={
+  grass:{name:"草地",walkable:true},
+  path:{name:"土路",walkable:true},
+  water:{name:"浅川",walkable:false},
+  tree:{name:"杉木",walkable:false},
+  stone:{name:"石块",walkable:false},
+  flower:{name:"野花",walkable:true},
+  bridge:{name:"木桥",walkable:true},
+  shrine:{name:"小祠",walkable:false},
+  house:{name:"民家",walkable:false}
+};
+
+const map=Array.from({length:MAP_H},()=>Array(MAP_W).fill("grass"));
+
+function setTile(x,y,type){
+  if(x>=0&&y>=0&&x<MAP_W&&y<MAP_H)map[y][x]=type;
+}
+
+function buildMap(){
+  for(let x=0;x<MAP_W;x++){
+    setTile(x,0,"tree"); setTile(x,MAP_H-1,"tree");
+  }
+  for(let y=0;y<MAP_H;y++){
+    setTile(0,y,"tree"); setTile(MAP_W-1,y,"tree");
+  }
+
+  for(let y=2;y<MAP_H-2;y++){
+    const riverX=27+Math.round(Math.sin(y*.48)*1.6);
+    setTile(riverX,y,"water");
+    setTile(riverX+1,y,"water");
+  }
+
+  for(let x=4;x<31;x++)setTile(x,16,"path");
+  for(let y=7;y<23;y++)setTile(12,y,"path");
+  for(let x=8;x<18;x++)setTile(x,9,"path");
+
+  setTile(27,16,"bridge");
+  setTile(28,16,"bridge");
+
+  const trees=[
+    [3,3],[4,3],[5,4],[7,3],[8,4],[9,3],[15,3],[16,4],[18,3],[20,5],
+    [2,8],[4,9],[6,7],[18,8],[20,9],[22,7],[31,4],[33,5],[31,7],[33,9],
+    [3,20],[5,21],[7,23],[9,22],[16,21],[18,23],[20,22],[23,24],[31,21],[33,23],
+    [24,5],[24,6],[23,10],[24,11],[30,12],[32,13],[31,18],[33,18]
+  ];
+  trees.forEach(([x,y])=>setTile(x,y,"tree"));
+
+  [[7,14],[8,14],[17,14],[18,14],[21,18],[22,18],[9,6],[10,6]].forEach(([x,y])=>setTile(x,y,"flower"));
+  [[5,12],[18,12],[22,20],[32,15]].forEach(([x,y])=>setTile(x,y,"stone"));
+
+  setTile(9,8,"house"); setTile(10,8,"house");
+  setTile(15,8,"house"); setTile(16,8,"house");
+  setTile(21,15,"shrine");
+
+  setTile(12,16,"path");
+  setTile(11,16,"path");
+  setTile(13,16,"path");
+}
+buildMap();
+
+const player={
+  x:12,y:16,
+  renderX:12,renderY:16,
+  facing:"south",
+  moving:false,
+  fromX:12,fromY:16,
+  toX:12,toY:16,
+  moveStart:0,
+  path:[]
+};
+
+const camera={x:player.x+.5,y:player.y+.5};
+let zoom=1;
+let targetZoom=1;
+let inspectTile={x:player.x,y:player.y};
+let zoomTimer=0;
+let cssWidth=innerWidth;
+let cssHeight=innerHeight;
+let dpr=Math.min(devicePixelRatio||1,2);
+
+function clamp(value,min,max){return Math.min(max,Math.max(min,value))}
+function hash(x,y,s=0){
+  let n=x*374761393+y*668265263+s*982451653;
+  n=(n^(n>>13))*1274126177;
+  return ((n^(n>>16))>>>0)/4294967295;
+}
+
+function resize(){
+  cssWidth=innerWidth;
+  cssHeight=innerHeight;
+  dpr=Math.min(devicePixelRatio||1,2);
+  canvas.width=Math.round(cssWidth*dpr);
+  canvas.height=Math.round(cssHeight*dpr);
+  canvas.style.width=cssWidth+"px";
+  canvas.style.height=cssHeight+"px";
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener("resize",resize,{passive:true});
+resize();
+
+function tileAt(x,y){
+  if(x<0||y<0||x>=MAP_W||y>=MAP_H)return "tree";
+  return map[y][x];
+}
+
+function canWalk(x,y){
+  return TILE_INFO[tileAt(x,y)]?.walkable===true;
+}
+
+function screenToTile(clientX,clientY){
+  const tileSize=BASE_TILE*zoom;
+  const wx=(clientX-cssWidth/2)/tileSize+camera.x;
+  const wy=(clientY-cssHeight/2)/tileSize+camera.y;
+  return {x:Math.floor(wx),y:Math.floor(wy)};
+}
+
+function tileToScreen(x,y){
+  const tileSize=BASE_TILE*zoom;
+  return {
+    x:(x-camera.x)*tileSize+cssWidth/2,
+    y:(y-camera.y)*tileSize+cssHeight/2
+  };
+}
+
+function roundedRect(x,y,w,h,r){
+  const rr=Math.min(r,w/2,h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+rr,y);
+  ctx.arcTo(x+w,y,x+w,y+h,rr);
+  ctx.arcTo(x+w,y+h,x,y+h,rr);
+  ctx.arcTo(x,y+h,x,y,rr);
+  ctx.arcTo(x,y,x+w,y,rr);
+  ctx.closePath();
+}
+
+function drawGroundTile(type,x,y,s){
+  if(type==="grass"||type==="flower"||type==="tree"||type==="stone"||type==="house"||type==="shrine"){
+    ctx.fillStyle="#9eae7a";
+    ctx.fillRect(x,y,s+1,s+1);
+    for(let i=0;i<4;i++){
+      const px=x+hash(Math.floor(x/s),Math.floor(y/s),i)*s;
+      const py=y+hash(Math.floor(x/s),Math.floor(y/s),i+7)*s;
+      ctx.strokeStyle=i%2?"rgba(85,106,62,.20)":"rgba(228,225,177,.18)";
+      ctx.lineWidth=Math.max(.7,s*.018);
+      ctx.beginPath();
+      ctx.moveTo(px,py+2);ctx.lineTo(px+2,py-2);ctx.stroke();
+    }
+  }
+  if(type==="path"){
+    ctx.fillStyle="#b9a37b";
+    ctx.fillRect(x,y,s+1,s+1);
+    ctx.fillStyle="rgba(87,69,48,.12)";
+    for(let i=0;i<3;i++){
+      ctx.beginPath();
+      ctx.arc(x+hash(x,y,i)*s,y+hash(y,x,i+8)*s,Math.max(1,s*.025),0,Math.PI*2);
+      ctx.fill();
+    }
+  }
+  if(type==="water"){
+    ctx.fillStyle="#719ca0";
+    ctx.fillRect(x,y,s+1,s+1);
+    ctx.strokeStyle="rgba(220,236,224,.32)";
+    ctx.lineWidth=Math.max(1,s*.025);
+    for(let i=0;i<2;i++){
+      const yy=y+s*(.32+i*.35);
+      ctx.beginPath();
+      ctx.moveTo(x+s*.12,yy);
+      ctx.quadraticCurveTo(x+s*.34,yy-s*.05,x+s*.56,yy);
+      ctx.quadraticCurveTo(x+s*.72,yy+s*.04,x+s*.9,yy-s*.01);
+      ctx.stroke();
+    }
+  }
+  if(type==="bridge"){
+    ctx.fillStyle="#8c623f";
+    ctx.fillRect(x,y,s+1,s+1);
+    ctx.strokeStyle="rgba(47,28,17,.35)";
+    ctx.lineWidth=Math.max(1,s*.025);
+    for(let i=1;i<5;i++){
+      const xx=x+s*i/5;
+      ctx.beginPath();ctx.moveTo(xx,y);ctx.lineTo(xx,y+s);ctx.stroke();
+    }
+    ctx.strokeStyle="rgba(235,192,132,.26)";
+    ctx.beginPath();ctx.moveTo(x,y+s*.18);ctx.lineTo(x+s,y+s*.18);ctx.stroke();
+  }
+}
+
+function drawObject(type,x,y,s){
+  if(type==="tree"){
+    ctx.fillStyle="rgba(43,43,26,.16)";
+    ctx.beginPath();ctx.ellipse(x+s*.53,y+s*.78,s*.26,s*.11,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#6e4e34";
+    ctx.fillRect(x+s*.45,y+s*.48,s*.12,s*.34);
+    ctx.fillStyle="#476847";
+    ctx.beginPath();ctx.arc(x+s*.50,y+s*.34,s*.29,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#5f8054";
+    ctx.beginPath();ctx.arc(x+s*.38,y+s*.28,s*.19,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#759264";
+    ctx.beginPath();ctx.arc(x+s*.59,y+s*.24,s*.18,0,Math.PI*2);ctx.fill();
+  }else if(type==="stone"){
+    ctx.fillStyle="rgba(54,48,41,.16)";
+    ctx.beginPath();ctx.ellipse(x+s*.53,y+s*.72,s*.25,s*.10,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#7f837c";
+    roundedRect(x+s*.25,y+s*.32,s*.50,s*.39,s*.09);ctx.fill();
+    ctx.fillStyle="rgba(230,231,213,.28)";
+    roundedRect(x+s*.31,y+s*.35,s*.31,s*.10,s*.04);ctx.fill();
+  }else if(type==="flower"){
+    const colors=["#cfb378","#bd7e73","#e2d19a"];
+    for(let i=0;i<4;i++){
+      ctx.fillStyle=colors[i%colors.length];
+      ctx.beginPath();
+      ctx.arc(x+s*(.28+.15*i),y+s*(.45+(i%2)*.13),Math.max(1.2,s*.035),0,Math.PI*2);
+      ctx.fill();
+    }
+  }else if(type==="house"){
+    ctx.fillStyle="rgba(43,35,27,.14)";
+    ctx.fillRect(x+s*.15,y+s*.78,s*.72,s*.08);
+    ctx.fillStyle="#ded1b2";
+    ctx.fillRect(x+s*.17,y+s*.36,s*.66,s*.46);
+    ctx.fillStyle="#4d4a43";
+    ctx.beginPath();
+    ctx.moveTo(x+s*.08,y+s*.39);
+    ctx.lineTo(x+s*.5,y+s*.15);
+    ctx.lineTo(x+s*.92,y+s*.39);
+    ctx.lineTo(x+s*.84,y+s*.47);
+    ctx.lineTo(x+s*.16,y+s*.47);
+    ctx.closePath();ctx.fill();
+    ctx.fillStyle="#76523a";
+    ctx.fillRect(x+s*.44,y+s*.56,s*.16,s*.26);
+  }else if(type==="shrine"){
+    ctx.fillStyle="#8e4e3d";
+    ctx.fillRect(x+s*.28,y+s*.32,s*.09,s*.5);
+    ctx.fillRect(x+s*.63,y+s*.32,s*.09,s*.5);
+    ctx.fillRect(x+s*.18,y+s*.27,s*.64,s*.09);
+    ctx.fillRect(x+s*.24,y+s*.18,s*.52,s*.07);
+    ctx.fillStyle="#503b2f";
+    ctx.fillRect(x+s*.24,y+s*.82,s*.52,s*.06);
+  }
+}
+
+function drawMap(){
+  const s=BASE_TILE*zoom;
+  const minX=Math.max(0,Math.floor(camera.x-cssWidth/(2*s))-2);
+  const maxX=Math.min(MAP_W-1,Math.ceil(camera.x+cssWidth/(2*s))+2);
+  const minY=Math.max(0,Math.floor(camera.y-cssHeight/(2*s))-2);
+  const maxY=Math.min(MAP_H-1,Math.ceil(camera.y+cssHeight/(2*s))+2);
+
+  ctx.fillStyle="#f2efe6";
+  ctx.fillRect(0,0,cssWidth,cssHeight);
+
+  for(let y=minY;y<=maxY;y++){
+    for(let x=minX;x<=maxX;x++){
+      const p=tileToScreen(x,y);
+      const type=tileAt(x,y);
+      drawGroundTile(type,p.x,p.y,s);
+    }
+  }
+
+  ctx.strokeStyle="rgba(70,66,55,.055)";
+  ctx.lineWidth=1;
+  for(let y=minY;y<=maxY+1;y++){
+    const p=tileToScreen(minX,y);
+    ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(tileToScreen(maxX+1,y).x,p.y);ctx.stroke();
+  }
+  for(let x=minX;x<=maxX+1;x++){
+    const p=tileToScreen(x,minY);
+    ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x,tileToScreen(x,maxY+1).y);ctx.stroke();
+  }
+
+  for(let y=minY;y<=maxY;y++){
+    for(let x=minX;x<=maxX;x++){
+      const type=tileAt(x,y);
+      if(["tree","stone","flower","house","shrine"].includes(type)){
+        const p=tileToScreen(x,y);
+        drawObject(type,p.x,p.y,s);
+      }
+    }
+  }
+
+  drawInspect(s);
+  drawPlayer(s);
+}
+
+function drawInspect(s){
+  if(!inspectTile)return;
+  const p=tileToScreen(inspectTile.x,inspectTile.y);
+  ctx.save();
+  ctx.strokeStyle="rgba(76,66,52,.66)";
+  ctx.lineWidth=Math.max(1.2,s*.035);
+  ctx.setLineDash([Math.max(3,s*.12),Math.max(2,s*.07)]);
+  ctx.strokeRect(p.x+2,p.y+2,s-4,s-4);
+  ctx.restore();
+}
+
+function drawPlayer(s){
+  const p=tileToScreen(player.renderX,player.renderY);
+  const x=p.x+s*.5;
+  const y=p.y+s*.54;
+  ctx.save();
+
+  ctx.fillStyle="rgba(46,37,29,.18)";
+  ctx.beginPath();ctx.ellipse(x,y+s*.27,s*.18,s*.07,0,0,Math.PI*2);ctx.fill();
+
+  ctx.fillStyle="#2e2c2a";
+  roundedRect(x-s*.12,y-s*.10,s*.24,s*.30,s*.06);ctx.fill();
+
+  ctx.fillStyle="#6f5943";
+  ctx.fillRect(x-s*.105,y+s*.14,s*.07,s*.17);
+  ctx.fillRect(x+s*.035,y+s*.14,s*.07,s*.17);
+
+  ctx.fillStyle="#d6b18a";
+  ctx.beginPath();ctx.arc(x,y-s*.20,s*.13,0,Math.PI*2);ctx.fill();
+
+  ctx.fillStyle="#332b25";
+  ctx.beginPath();
+  ctx.arc(x,y-s*.235,s*.135,Math.PI,Math.PI*2);
+  ctx.lineTo(x+s*.12,y-s*.18);
+  ctx.lineTo(x-s*.12,y-s*.18);
+  ctx.closePath();ctx.fill();
+
+  const dir={
+    north:[0,-1],south:[0,1],west:[-1,0],east:[1,0]
+  }[player.facing];
+  ctx.fillStyle="#e6d39c";
+  ctx.beginPath();
+  ctx.arc(x+dir[0]*s*.07,y-s*.18+dir[1]*s*.025,Math.max(1.1,s*.025),0,Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function updateHud(){
+  coordEl.textContent=`${player.x}, ${player.y}`;
+  facingEl.textContent=({north:"北",south:"南",west:"西",east:"东"})[player.facing];
+  if(inspectTile){
+    inspectNameEl.textContent=TILE_INFO[tileAt(inspectTile.x,inspectTile.y)].name;
+    inspectCoordEl.textContent=`${inspectTile.x}, ${inspectTile.y}`;
+  }
+}
+
+function startMove(nx,ny){
+  if(player.moving||!canWalk(nx,ny))return false;
+  const dx=nx-player.x;
+  const dy=ny-player.y;
+  if(Math.abs(dx)+Math.abs(dy)!==1)return false;
+
+  if(dx<0)player.facing="west";
+  else if(dx>0)player.facing="east";
+  else if(dy<0)player.facing="north";
+  else if(dy>0)player.facing="south";
+
+  player.fromX=player.x;
+  player.fromY=player.y;
+  player.toX=nx;
+  player.toY=ny;
+  player.x=nx;
+  player.y=ny;
+  player.moveStart=performance.now();
+  player.moving=true;
+  updateHud();
+
+  if(MOVE_MS===0){
+    player.renderX=nx;
+    player.renderY=ny;
+    player.moving=false;
+  }
+  return true;
+}
+
+function directionStep(dx,dy){
+  player.path.length=0;
+  if(player.moving)return;
+  const nx=player.x+dx;
+  const ny=player.y+dy;
+  if(!startMove(nx,ny)){
+    if(dx<0)player.facing="west";
+    else if(dx>0)player.facing="east";
+    else if(dy<0)player.facing="north";
+    else if(dy>0)player.facing="south";
+    updateHud();
+  }
+}
+
+function findPath(sx,sy,tx,ty){
+  if(!canWalk(tx,ty))return [];
+  const key=(x,y)=>y*MAP_W+x;
+  const queue=[[sx,sy]];
+  const prev=new Map();
+  prev.set(key(sx,sy),null);
+  const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+
+  for(let qi=0;qi<queue.length;qi++){
+    const [x,y]=queue[qi];
+    if(x===tx&&y===ty)break;
+    for(const [dx,dy] of dirs){
+      const nx=x+dx,ny=y+dy,k=key(nx,ny);
+      if(nx<0||ny<0||nx>=MAP_W||ny>=MAP_H||prev.has(k)||!canWalk(nx,ny))continue;
+      prev.set(k,[x,y]);
+      queue.push([nx,ny]);
+    }
+  }
+
+  if(!prev.has(key(tx,ty)))return [];
+  const result=[];
+  let cur=[tx,ty];
+  while(cur&&!(cur[0]===sx&&cur[1]===sy)){
+    result.push(cur);
+    cur=prev.get(key(cur[0],cur[1]));
+  }
+  return result.reverse();
+}
+
+function handleKey(event){
+  const mapKey={
+    ArrowUp:[0,-1],KeyW:[0,-1],
+    ArrowDown:[0,1],KeyS:[0,1],
+    ArrowLeft:[-1,0],KeyA:[-1,0],
+    ArrowRight:[1,0],KeyD:[1,0]
+  };
+  const dir=mapKey[event.code];
+  if(dir){
+    event.preventDefault();
+    directionStep(dir[0],dir[1]);
+  }else if(event.code==="Escape"){
+    player.path.length=0;
+    inspectTile={x:player.x,y:player.y};
+    updateHud();
+  }
+}
+addEventListener("keydown",handleKey,{passive:false});
+
+function showZoom(){
+  zoomFlash.textContent=Math.round(targetZoom*100)+"%";
+  zoomFlash.dataset.visible="true";
+  clearTimeout(zoomTimer);
+  zoomTimer=setTimeout(()=>{zoomFlash.dataset.visible="false"},420);
+}
+
+window.addEventListener("wheel",event=>{
+  event.preventDefault();
+  event.stopPropagation();
+  const direction=Math.sign(event.deltaY);
+  targetZoom=clamp(targetZoom-direction*.10,ZOOM_MIN,ZOOM_MAX);
+  showZoom();
+},{passive:false,capture:true});
+
+document.addEventListener("contextmenu",event=>{
+  event.preventDefault();
+  event.stopPropagation();
+},{capture:true});
+
+canvas.addEventListener("pointerdown",event=>{
+  const target=screenToTile(event.clientX,event.clientY);
+  if(target.x<0||target.y<0||target.x>=MAP_W||target.y>=MAP_H)return;
+
+  if(event.button===2){
+    event.preventDefault();
+    player.path.length=0;
+    inspectTile=target;
+    const dx=target.x-player.x;
+    const dy=target.y-player.y;
+    if(Math.abs(dx)>Math.abs(dy)){
+      player.facing=dx<0?"west":"east";
+    }else if(dy!==0){
+      player.facing=dy<0?"north":"south";
+    }
+    updateHud();
+    return;
+  }
+
+  if(event.button===0){
+    inspectTile=target;
+    player.path=findPath(player.x,player.y,target.x,target.y);
+    updateHud();
+  }
+});
+
+function tick(now){
+  if(player.moving&&MOVE_MS>0){
+    const t=clamp((now-player.moveStart)/MOVE_MS,0,1);
+    const eased=1-Math.pow(1-t,3);
+    player.renderX=player.fromX+(player.toX-player.fromX)*eased;
+    player.renderY=player.fromY+(player.toY-player.fromY)*eased;
+    if(t>=1){
+      player.renderX=player.toX;
+      player.renderY=player.toY;
+      player.moving=false;
+    }
+  }
+
+  if(!player.moving&&player.path.length){
+    const next=player.path.shift();
+    startMove(next[0],next[1]);
+  }
+
+  zoom+=(targetZoom-zoom)*.18;
+  if(Math.abs(targetZoom-zoom)<.001)zoom=targetZoom;
+
+  const targetCameraX=player.renderX+.5;
+  const targetCameraY=player.renderY+.5;
+  camera.x+=(targetCameraX-camera.x)*.18;
+  camera.y+=(targetCameraY-camera.y)*.18;
+
+  drawMap();
+  requestAnimationFrame(tick);
 }
 
 function movePointer(event){
@@ -277,27 +819,31 @@ function movePointer(event){
   pointer.style.top=`${event.clientY}px`;
   pointer.dataset.visible="true";
 }
-
-window.addEventListener("pointermove",movePointer,{passive:true});
-window.addEventListener("pointerenter",movePointer,{passive:true});
-function hidePointer(){
-  pointer.dataset.visible="false";
-}
-
+function hidePointer(){pointer.dataset.visible="false"}
 function wobblePointer(){
-  if(!finePointer.matches||matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+  if(!finePointer.matches||reduceMotion.matches)return;
   pointerShape.classList.remove("is-wobbling");
   void pointerShape.offsetWidth;
   pointerShape.classList.add("is-wobbling");
 }
 
+window.addEventListener("pointermove",movePointer,{passive:true});
+window.addEventListener("pointerenter",movePointer,{passive:true});
 document.documentElement.addEventListener("pointerleave",hidePointer);
 window.addEventListener("blur",hidePointer);
 window.addEventListener("pointerdown",wobblePointer);
+pointerShape.addEventListener("animationend",()=>pointerShape.classList.remove("is-wobbling"));
 
-pointerShape.addEventListener("animationend",()=>{
-  pointerShape.classList.remove("is-wobbling");
-});
+if(visualCheck){
+  pointer.style.display="block";
+  pointer.style.left="64%";
+  pointer.style.top="42%";
+  pointer.dataset.visible="true";
+  inspectTile={x:21,y:15};
+}
+
+updateHud();
+requestAnimationFrame(tick);
 </script>
 </body>
 </html>
