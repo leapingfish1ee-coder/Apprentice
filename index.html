@@ -370,62 +370,183 @@ const PERF_SAMPLE_LIMIT=240;
 const PERF_SLOW_FRAME_MS=20;
 
 const TILE_INFO={
-  grass:{name:"草地",walkable:true},
-  path:{name:"土路",walkable:true},
+  field:{name:"荒草地",walkable:true},
+  grass:{name:"湿草地",walkable:true},
+  mud:{name:"泥地",walkable:true},
+  path:{name:"车辙土路",walkable:true},
+  puddle:{name:"积水",walkable:true},
   water:{name:"浅川",walkable:false},
-  tree:{name:"杉木",walkable:false},
+  tree:{name:"密林",walkable:false},
+  bush:{name:"荆丛",walkable:false},
+  stump:{name:"树桩",walkable:false},
+  log:{name:"倒木",walkable:false},
   stone:{name:"石块",walkable:false},
   flower:{name:"野花",walkable:true},
-  bridge:{name:"木桥",walkable:true},
-  shrine:{name:"小祠",walkable:false},
+  bridge:{name:"旧木桥",walkable:true},
+  fence:{name:"木篱",walkable:false},
+  cart:{name:"破车",walkable:false},
+  ruin:{name:"残垣",walkable:false},
+  shrine:{name:"路祠",walkable:false},
   house:{name:"民家",walkable:false}
 };
 
-const map=Array.from({length:MAP_H},()=>Array(MAP_W).fill("grass"));
+const map=Array.from({length:MAP_H},()=>Array(MAP_W).fill("field"));
 
 function setTile(x,y,type){
   if(x>=0&&y>=0&&x<MAP_W&&y<MAP_H)map[y][x]=type;
 }
 
+function setRoadTile(x,y){
+  const current=tileAt(x,y);
+  setTile(x,y,current==="water"?"bridge":"path");
+}
+
 function buildMap(){
-  for(let x=0;x<MAP_W;x++){
-    setTile(x,0,"tree"); setTile(x,MAP_H-1,"tree");
-  }
   for(let y=0;y<MAP_H;y++){
-    setTile(0,y,"tree"); setTile(MAP_W-1,y,"tree");
+    for(let x=0;x<MAP_W;x++){
+      const broad=hash(Math.floor(x/3),Math.floor(y/3),211);
+      const fine=hash(x,y,223);
+      setTile(x,y,broad*.68+fine*.32>.54?"grass":"field");
+    }
   }
 
-  for(let y=2;y<MAP_H-2;y++){
-    const riverX=27+Math.round(Math.sin(y*.48)*1.6);
+  // Meandering river on the eastern third.
+  for(let y=1;y<MAP_H-1;y++){
+    const riverX=28+Math.round(Math.sin(y*.42)*1.45+Math.sin(y*.17)*.55);
     setTile(riverX,y,"water");
     setTile(riverX+1,y,"water");
+    if(y%5===1&&riverX-1>0)setTile(riverX-1,y,"mud");
   }
 
-  for(let x=4;x<31;x++)setTile(x,16,"path");
-  for(let y=7;y<23;y++)setTile(12,y,"path");
-  for(let x=8;x<18;x++)setTile(x,9,"path");
+  // Main road: a broad east-west route with subtle bends.
+  const mainRoad=[];
+  for(let x=2;x<MAP_W-2;x++){
+    const y=16+Math.round(Math.sin((x-12)*.31)*1.15);
+    mainRoad.push([x,y]);
+    setRoadTile(x,y);
 
-  setTile(27,16,"bridge");
-  setTile(28,16,"bridge");
+    if(tileAt(x,y-1)!=="water"&&hash(x,y,301)>.38)setTile(x,y-1,"mud");
+    if(tileAt(x,y+1)!=="water"&&hash(x,y,307)>.44)setTile(x,y+1,"mud");
+  }
 
-  const trees=[
-    [3,3],[4,3],[5,4],[7,3],[8,4],[9,3],[15,3],[16,4],[18,3],[20,5],
-    [2,8],[4,9],[6,7],[18,8],[20,9],[22,7],[31,4],[33,5],[31,7],[33,9],
-    [3,20],[5,21],[7,23],[9,22],[16,21],[18,23],[20,22],[23,24],[31,21],[33,23],
-    [24,5],[24,6],[23,10],[24,11],[30,12],[32,13],[31,18],[33,18]
-  ];
-  trees.forEach(([x,y])=>setTile(x,y,"tree"));
+  // North branch into the hamlet.
+  for(let y=6;y<=16;y++){
+    const x=12+Math.round(Math.sin((y-9)*.55)*.75);
+    setRoadTile(x,y);
+    if(y<15&&tileAt(x+1,y)!=="water"&&hash(x,y,313)>.52)setTile(x+1,y,"mud");
+  }
 
-  [[7,14],[8,14],[17,14],[18,14],[21,18],[22,18],[9,6],[10,6]].forEach(([x,y])=>setTile(x,y,"flower"));
-  [[5,12],[18,12],[22,20],[32,15]].forEach(([x,y])=>setTile(x,y,"stone"));
+  // Western fork and a short track toward the ruined roadside site.
+  for(let step=0;step<10;step++){
+    const x=12-step;
+    const y=12-Math.round(step*.48);
+    setRoadTile(x,y);
+  }
+  for(let step=0;step<8;step++){
+    const x=20+step;
+    const y=17+Math.round(step*.32);
+    setRoadTile(x,y);
+  }
 
-  setTile(9,8,"house"); setTile(10,8,"house");
-  setTile(15,8,"house"); setTile(16,8,"house");
+  // Muddy hamlet yards.
+  for(let y=6;y<=11;y++){
+    for(let x=7;x<=17;x++){
+      if(tileAt(x,y)==="field"||tileAt(x,y)==="grass"){
+        const yard=hash(x,y,337);
+        if(yard>.34)setTile(x,y,yard>.78?"puddle":"mud");
+      }
+    }
+  }
+
+  // Houses are deliberately offset from the road, leaving small yards.
+  [[8,7],[15,8],[9,10]].forEach(([x,y])=>setTile(x,y,"house"));
+  [[7,8],[7,9],[16,9],[17,9],[8,11],[9,11]].forEach(([x,y])=>{
+    if(tileAt(x,y)!=="path")setTile(x,y,"fence");
+  });
+  setTile(6,9,"cart");
+  setTile(17,7,"stump");
+
+  // Roadside ruin / shrine cluster.
   setTile(21,15,"shrine");
+  setTile(22,14,"ruin");
+  setTile(23,14,"ruin");
+  setTile(23,15,"log");
+  setTile(20,14,"stone");
 
+  // Dense forest edge and irregular interior copses.
+  for(let y=0;y<MAP_H;y++){
+    for(let x=0;x<MAP_W;x++){
+      const type=tileAt(x,y);
+      if(!["field","grass","mud"].includes(type))continue;
+
+      const edge=Math.min(x,y,MAP_W-1-x,MAP_H-1-y);
+      const cluster=
+        hash(Math.floor((x+2)/4),Math.floor((y+1)/4),401)*.56+
+        hash(x,y,409)*.44;
+      const threshold=edge<=1?.18:edge===2?.42:edge===3?.68:.90;
+
+      const nearRoad=
+        tileAt(x-1,y)==="path"||tileAt(x+1,y)==="path"||
+        tileAt(x,y-1)==="path"||tileAt(x,y+1)==="path"||
+        tileAt(x-1,y)==="bridge"||tileAt(x+1,y)==="bridge";
+
+      if(cluster>threshold&&!nearRoad){
+        setTile(x,y,"tree");
+      }else if(cluster>threshold-.09&&!nearRoad&&hash(x,y,431)>.60){
+        setTile(x,y,"bush");
+      }
+    }
+  }
+
+  // Preserve border as a forest wall, except where the road leaves the map.
+  for(let x=0;x<MAP_W;x++){
+    if(x<2||x>MAP_W-3){
+      setTile(x,0,"tree");
+      setTile(x,MAP_H-1,"tree");
+    }else{
+      if(tileAt(x,0)!=="path")setTile(x,0,"tree");
+      if(tileAt(x,MAP_H-1)!=="path")setTile(x,MAP_H-1,"tree");
+    }
+  }
+  for(let y=0;y<MAP_H;y++){
+    if(tileAt(0,y)!=="path")setTile(0,y,"tree");
+    if(tileAt(MAP_W-1,y)!=="path")setTile(MAP_W-1,y,"tree");
+  }
+
+  // Clear readable breathing space around the starting crossroads.
+  for(let y=14;y<=18;y++){
+    for(let x=10;x<=15;x++){
+      const type=tileAt(x,y);
+      if(type==="tree"||type==="bush")setTile(x,y,hash(x,y,467)>.5?"field":"grass");
+    }
+  }
+
+  // Scatter grounded environmental storytelling.
+  const props=[
+    [5,13,"stump"],[6,20,"log"],[18,12,"stone"],[19,20,"stump"],
+    [24,20,"log"],[31,15,"stone"],[32,21,"stump"],[25,8,"stone"],
+    [4,18,"bush"],[18,22,"bush"],[30,10,"bush"]
+  ];
+  props.forEach(([x,y,type])=>{
+    if(["field","grass","mud"].includes(tileAt(x,y)))setTile(x,y,type);
+  });
+
+  // Small puddles and flowers live mainly in open ground.
+  for(let y=3;y<MAP_H-3;y++){
+    for(let x=3;x<MAP_W-3;x++){
+      const type=tileAt(x,y);
+      const n=hash(x,y,503);
+      if((type==="field"||type==="grass")&&n>.965)setTile(x,y,"flower");
+      else if(type==="mud"&&n<.10)setTile(x,y,"puddle");
+    }
+  }
+
+  // Ensure the player spawn and immediate movement corridor are valid.
   setTile(12,16,"path");
   setTile(11,16,"path");
   setTile(13,16,"path");
+  setTile(12,15,"path");
+  setTile(12,17,"path");
 }
 buildMap();
 
@@ -445,7 +566,7 @@ const vision=Array.from({length:MAP_H},()=>Array(MAP_W).fill(0));
 const fogCurrent=Array.from({length:MAP_H},()=>Array(MAP_W).fill(1));
 const fogFrom=Array.from({length:MAP_H},()=>Array(MAP_W).fill(1));
 const fogTarget=Array.from({length:MAP_H},()=>Array(MAP_W).fill(1));
-const OPAQUE_TILES=new Set(["tree","stone","house","shrine"]);
+const OPAQUE_TILES=new Set(["tree","bush","house","shrine","ruin"]);
 let fogTransitionStart=performance.now();
 let fogTransitionDuration=0;
 let fogTextureLastUpdate=-Infinity;
@@ -787,112 +908,303 @@ function roundedRect(x,y,w,h,r,target=ctx){
 }
 
 function drawGroundTile(type,x,y,s,target=ctx,tileX=0,tileY=0){
-  if(type==="grass"||type==="flower"||type==="tree"||type==="stone"||type==="house"||type==="shrine"){
-    target.fillStyle="#9eae7a";
-    target.fillRect(x,y,s+1,s+1);
-    for(let i=0;i<4;i++){
-      const px=x+hash(tileX,tileY,i)*s;
-      const py=y+hash(tileX,tileY,i+7)*s;
-      target.strokeStyle=i%2?"rgba(85,106,62,.20)":"rgba(228,225,177,.18)";
-      target.lineWidth=Math.max(.7,s*.018);
+  const px=Math.floor(x);
+  const py=Math.floor(y);
+  const seed=hash(tileX,tileY,601);
+
+  const openGround=["field","grass","flower","tree","bush","stump","log","stone","house","shrine","fence","cart","ruin"];
+  if(openGround.includes(type)){
+    const base=type==="grass"||seed>.58?"#667253":"#77745a";
+    target.fillStyle=base;
+    target.fillRect(px,py,Math.ceil(s)+1,Math.ceil(s)+1);
+
+    for(let i=0;i<7;i++){
+      const nx=hash(tileX,tileY,610+i);
+      const ny=hash(tileX,tileY,630+i);
+      const h=s*(.035+hash(tileX,tileY,650+i)*.055);
+      target.strokeStyle=i%3===0?"rgba(183,174,126,.18)":"rgba(45,55,37,.28)";
+      target.lineWidth=Math.max(.6,s*.012);
       target.beginPath();
-      target.moveTo(px,py+2);target.lineTo(px+2,py-2);target.stroke();
+      target.moveTo(x+nx*s,y+ny*s);
+      target.lineTo(x+nx*s+s*.018,y+ny*s-h);
+      target.stroke();
+    }
+
+    if(type==="field"||seed<.46){
+      target.fillStyle="rgba(54,48,37,.10)";
+      for(let i=0;i<3;i++){
+        const rx=x+hash(tileX,tileY,680+i)*s;
+        const ry=y+hash(tileX,tileY,690+i)*s;
+        target.fillRect(rx,ry,Math.max(1,s*.025),Math.max(1,s*.018));
+      }
     }
   }
-  if(type==="path"){
-    target.fillStyle="#b9a37b";
-    target.fillRect(x,y,s+1,s+1);
-    target.fillStyle="rgba(87,69,48,.12)";
+
+  if(type==="mud"||type==="path"||type==="puddle"){
+    target.fillStyle=type==="path"?"#756652":"#625b4d";
+    target.fillRect(px,py,Math.ceil(s)+1,Math.ceil(s)+1);
+
+    const left=tileAt(tileX-1,tileY);
+    const right=tileAt(tileX+1,tileY);
+    const up=tileAt(tileX,tileY-1);
+    const down=tileAt(tileX,tileY+1);
+    const roadish=t=>t==="path"||t==="bridge";
+    const horizontal=roadish(left)||roadish(right);
+    const vertical=roadish(up)||roadish(down);
+
+    if(type==="path"){
+      target.strokeStyle="rgba(45,38,31,.25)";
+      target.lineWidth=Math.max(1,s*.035);
+      if(horizontal){
+        for(const yy of [.36,.66]){
+          target.beginPath();
+          target.moveTo(x-s*.04,y+s*yy);
+          target.bezierCurveTo(
+            x+s*.28,y+s*(yy-.035),
+            x+s*.67,y+s*(yy+.03),
+            x+s*1.04,y+s*(yy-.012)
+          );
+          target.stroke();
+        }
+      }
+      if(vertical){
+        for(const xx of [.36,.66]){
+          target.beginPath();
+          target.moveTo(x+s*xx,y-s*.04);
+          target.bezierCurveTo(
+            x+s*(xx-.03),y+s*.30,
+            x+s*(xx+.03),y+s*.70,
+            x+s*(xx-.01),y+s*1.04
+          );
+          target.stroke();
+        }
+      }
+    }
+
+    target.fillStyle="rgba(36,31,26,.12)";
     for(let i=0;i<3;i++){
+      const rx=x+hash(tileX,tileY,720+i)*s;
+      const ry=y+hash(tileX,tileY,730+i)*s;
       target.beginPath();
-      target.arc(
-        x+hash(tileX,tileY,i)*s,
-        y+hash(tileY,tileX,i+8)*s,
-        Math.max(1,s*.025),
-        0,
-        Math.PI*2
-      );
+      target.ellipse(rx,ry,s*.035,s*.018,hash(tileX,tileY,740+i)*Math.PI,0,Math.PI*2);
       target.fill();
     }
   }
+
+  if(type==="puddle"){
+    target.fillStyle="rgba(70,91,86,.64)";
+    target.beginPath();
+    target.ellipse(x+s*.52,y+s*.58,s*.31,s*.17,-.12,0,Math.PI*2);
+    target.fill();
+    target.strokeStyle="rgba(171,184,157,.28)";
+    target.lineWidth=Math.max(.7,s*.012);
+    target.beginPath();
+    target.moveTo(x+s*.32,y+s*.54);
+    target.quadraticCurveTo(x+s*.52,y+s*.49,x+s*.72,y+s*.55);
+    target.stroke();
+  }
+
   if(type==="water"){
-    target.fillStyle="#719ca0";
-    target.fillRect(x,y,s+1,s+1);
-    target.strokeStyle="rgba(220,236,224,.32)";
-    target.lineWidth=Math.max(1,s*.025);
-    for(let i=0;i<2;i++){
-      const yy=y+s*(.32+i*.35);
+    target.fillStyle="#4f6b6d";
+    target.fillRect(px,py,Math.ceil(s)+1,Math.ceil(s)+1);
+    target.fillStyle="rgba(35,52,52,.14)";
+    target.fillRect(x,y+s*.72,s+1,s*.28+1);
+    target.strokeStyle="rgba(185,200,179,.30)";
+    target.lineWidth=Math.max(1,s*.022);
+    for(let i=0;i<3;i++){
+      const yy=y+s*(.22+i*.27)+hash(tileX,tileY,760+i)*s*.05;
       target.beginPath();
-      target.moveTo(x+s*.12,yy);
-      target.quadraticCurveTo(x+s*.34,yy-s*.05,x+s*.56,yy);
-      target.quadraticCurveTo(x+s*.72,yy+s*.04,x+s*.9,yy-s*.01);
+      target.moveTo(x+s*.08,yy);
+      target.lineTo(x+s*.30,yy-s*.025);
+      target.lineTo(x+s*.51,yy+s*.012);
+      target.lineTo(x+s*.78,yy-s*.018);
       target.stroke();
     }
   }
+
   if(type==="bridge"){
-    target.fillStyle="#8c623f";
-    target.fillRect(x,y,s+1,s+1);
-    target.strokeStyle="rgba(47,28,17,.35)";
-    target.lineWidth=Math.max(1,s*.025);
-    for(let i=1;i<5;i++){
-      const xx=x+s*i/5;
+    target.fillStyle="#624a37";
+    target.fillRect(px,py,Math.ceil(s)+1,Math.ceil(s)+1);
+    target.strokeStyle="rgba(33,24,19,.42)";
+    target.lineWidth=Math.max(1,s*.026);
+    for(let i=1;i<6;i++){
+      const xx=x+s*i/6;
       target.beginPath();target.moveTo(xx,y);target.lineTo(xx,y+s);target.stroke();
     }
-    target.strokeStyle="rgba(235,192,132,.26)";
-    target.beginPath();target.moveTo(x,y+s*.18);target.lineTo(x+s,y+s*.18);target.stroke();
+    target.strokeStyle="rgba(202,166,111,.22)";
+    target.beginPath();target.moveTo(x,y+s*.15);target.lineTo(x+s,y+s*.15);target.stroke();
+    target.beginPath();target.moveTo(x,y+s*.84);target.lineTo(x+s,y+s*.84);target.stroke();
   }
 }
 
 function drawObject(type,x,y,s,target=ctx){
+  const sx=hash(Math.floor(x/s),Math.floor(y/s),811);
+
   if(type==="tree"){
-    target.fillStyle="rgba(43,43,26,.16)";
-    target.beginPath();target.ellipse(x+s*.53,y+s*.78,s*.26,s*.11,0,0,Math.PI*2);target.fill();
-    target.fillStyle="#6e4e34";
-    target.fillRect(x+s*.45,y+s*.48,s*.12,s*.34);
-    target.fillStyle="#476847";
-    target.beginPath();target.arc(x+s*.50,y+s*.34,s*.29,0,Math.PI*2);target.fill();
-    target.fillStyle="#5f8054";
-    target.beginPath();target.arc(x+s*.38,y+s*.28,s*.19,0,Math.PI*2);target.fill();
-    target.fillStyle="#759264";
-    target.beginPath();target.arc(x+s*.59,y+s*.24,s*.18,0,Math.PI*2);target.fill();
-  }else if(type==="stone"){
-    target.fillStyle="rgba(54,48,41,.16)";
-    target.beginPath();target.ellipse(x+s*.53,y+s*.72,s*.25,s*.10,0,0,Math.PI*2);target.fill();
-    target.fillStyle="#7f837c";
-    roundedRect(x+s*.25,y+s*.32,s*.50,s*.39,s*.09,target);target.fill();
-    target.fillStyle="rgba(230,231,213,.28)";
-    roundedRect(x+s*.31,y+s*.35,s*.31,s*.10,s*.04,target);target.fill();
-  }else if(type==="flower"){
-    const colors=["#cfb378","#bd7e73","#e2d19a"];
-    for(let i=0;i<4;i++){
-      target.fillStyle=colors[i%colors.length];
-      target.beginPath();
-      target.arc(x+s*(.28+.15*i),y+s*(.45+(i%2)*.13),Math.max(1.2,s*.035),0,Math.PI*2);
-      target.fill();
-    }
-  }else if(type==="house"){
-    target.fillStyle="rgba(43,35,27,.14)";
-    target.fillRect(x+s*.15,y+s*.78,s*.72,s*.08);
-    target.fillStyle="#ded1b2";
-    target.fillRect(x+s*.17,y+s*.36,s*.66,s*.46);
-    target.fillStyle="#4d4a43";
+    target.fillStyle="rgba(24,27,20,.22)";
     target.beginPath();
-    target.moveTo(x+s*.08,y+s*.39);
-    target.lineTo(x+s*.5,y+s*.15);
-    target.lineTo(x+s*.92,y+s*.39);
-    target.lineTo(x+s*.84,y+s*.47);
-    target.lineTo(x+s*.16,y+s*.47);
+    target.ellipse(x+s*.53,y+s*.82,s*.34,s*.12,0,0,Math.PI*2);
+    target.fill();
+
+    target.fillStyle="#513d30";
+    target.fillRect(x+s*.455,y+s*.46,s*.105,s*.40);
+
+    if(sx>.48){
+      const layers=[
+        [".50",".11",".34","#324a38"],
+        [".50",".25",".30","#405941"],
+        [".50",".38",".25","#52694a"]
+      ];
+      for(const [cx,cy,r,color] of layers){
+        target.fillStyle=color;
+        target.beginPath();
+        target.moveTo(x+s*Number(cx),y-s*.16+s*Number(cy));
+        target.lineTo(x+s*(Number(cx)-Number(r)),y+s*Number(cy)+s*.30);
+        target.lineTo(x+s*(Number(cx)+Number(r)),y+s*Number(cy)+s*.30);
+        target.closePath();
+        target.fill();
+      }
+    }else{
+      const crowns=[
+        [.32,.22,.34,"#334b39"],
+        [.61,.20,.31,"#3e5840"],
+        [.48,.02,.30,"#526a49"],
+        [.46,.34,.31,"#435d42"]
+      ];
+      for(const [cx,cy,r,color] of crowns){
+        target.fillStyle=color;
+        target.beginPath();
+        target.arc(x+s*cx,y+s*cy,s*r,0,Math.PI*2);
+        target.fill();
+      }
+    }
+
+    target.fillStyle="rgba(171,175,126,.09)";
+    target.beginPath();
+    target.arc(x+s*.40,y+s*.05,s*.16,0,Math.PI*2);
+    target.fill();
+  }else if(type==="bush"){
+    target.fillStyle="rgba(28,31,22,.15)";
+    target.beginPath();target.ellipse(x+s*.50,y+s*.70,s*.30,s*.10,0,0,Math.PI*2);target.fill();
+    const blobs=[
+      [.31,.49,.22,"#40583d"],[.55,.43,.25,"#344a38"],[.69,.55,.20,"#536a48"]
+    ];
+    blobs.forEach(([cx,cy,r,c])=>{
+      target.fillStyle=c;
+      target.beginPath();target.arc(x+s*cx,y+s*cy,s*r,0,Math.PI*2);target.fill();
+    });
+  }else if(type==="stone"||type==="ruin"){
+    target.fillStyle="rgba(38,34,31,.18)";
+    target.beginPath();target.ellipse(x+s*.52,y+s*.76,s*.31,s*.10,0,0,Math.PI*2);target.fill();
+    target.fillStyle=type==="ruin"?"#777368":"#6f746f";
+    if(type==="ruin"){
+      target.fillRect(x+s*.16,y+s*.37,s*.68,s*.34);
+      target.fillStyle="#56544d";
+      target.fillRect(x+s*.18,y+s*.34,s*.28,s*.08);
+      target.fillRect(x+s*.58,y+s*.30,s*.24,s*.09);
+      target.fillStyle="rgba(205,199,169,.12)";
+      target.fillRect(x+s*.23,y+s*.43,s*.24,s*.05);
+    }else{
+      roundedRect(x+s*.20,y+s*.34,s*.60,s*.40,s*.10,target);target.fill();
+      target.fillStyle="rgba(215,213,188,.20)";
+      roundedRect(x+s*.29,y+s*.37,s*.32,s*.09,s*.03,target);target.fill();
+    }
+  }else if(type==="stump"){
+    target.fillStyle="rgba(35,30,25,.17)";
+    target.beginPath();target.ellipse(x+s*.51,y+s*.70,s*.22,s*.08,0,0,Math.PI*2);target.fill();
+    target.fillStyle="#604733";
+    target.fillRect(x+s*.38,y+s*.43,s*.25,s*.26);
+    target.fillStyle="#927252";
+    target.beginPath();target.ellipse(x+s*.505,y+s*.43,s*.13,s*.055,0,0,Math.PI*2);target.fill();
+    target.strokeStyle="rgba(67,47,32,.55)";
+    target.lineWidth=Math.max(.8,s*.015);
+    target.beginPath();target.ellipse(x+s*.505,y+s*.43,s*.075,s*.03,0,0,Math.PI*2);target.stroke();
+  }else if(type==="log"){
+    target.save();
+    target.translate(x+s*.50,y+s*.58);
+    target.rotate(-.28);
+    target.fillStyle="rgba(30,27,22,.18)";
+    target.fillRect(-s*.34,s*.07,s*.70,s*.10);
+    target.fillStyle="#5a432f";
+    roundedRect(-s*.36,-s*.09,s*.72,s*.18,s*.08,target);target.fill();
+    target.strokeStyle="rgba(164,125,82,.28)";
+    target.lineWidth=Math.max(.8,s*.018);
+    target.beginPath();target.moveTo(-s*.24,-s*.02);target.lineTo(s*.22,-s*.02);target.stroke();
+    target.restore();
+  }else if(type==="flower"){
+    const colors=["#c3ad78","#a56f69","#d3c18c"];
+    for(let i=0;i<5;i++){
+      target.fillStyle=colors[i%colors.length];
+      target.fillRect(
+        x+s*(.20+.13*i),
+        y+s*(.48+(i%2)*.12),
+        Math.max(2,s*.045),
+        Math.max(2,s*.045)
+      );
+    }
+  }else if(type==="fence"){
+    target.strokeStyle="#584332";
+    target.lineWidth=Math.max(2,s*.07);
+    target.lineCap="square";
+    target.beginPath();target.moveTo(x+s*.08,y+s*.56);target.lineTo(x+s*.92,y+s*.52);target.stroke();
+    target.lineWidth=Math.max(1,s*.035);
+    for(const xx of [.22,.72]){
+      target.beginPath();target.moveTo(x+s*xx,y+s*.30);target.lineTo(x+s*xx,y+s*.76);target.stroke();
+    }
+  }else if(type==="cart"){
+    target.fillStyle="rgba(37,31,26,.18)";
+    target.beginPath();target.ellipse(x+s*.51,y+s*.78,s*.34,s*.09,0,0,Math.PI*2);target.fill();
+    target.strokeStyle="#4e392b";
+    target.lineWidth=Math.max(2,s*.045);
+    for(const cx of [.30,.70]){
+      target.beginPath();target.arc(x+s*cx,y+s*.70,s*.16,0,Math.PI*2);target.stroke();
+      target.beginPath();target.moveTo(x+s*cx,y+s*.54);target.lineTo(x+s*cx,y+s*.86);target.stroke();
+    }
+    target.fillStyle="#684d36";
+    target.fillRect(x+s*.23,y+s*.38,s*.55,s*.26);
+    target.strokeStyle="rgba(190,147,91,.24)";
+    target.lineWidth=Math.max(1,s*.02);
+    target.strokeRect(x+s*.28,y+s*.42,s*.45,s*.17);
+  }else if(type==="house"){
+    target.fillStyle="rgba(34,29,25,.22)";
+    target.beginPath();target.ellipse(x+s*.52,y+s*.84,s*.48,s*.13,0,0,Math.PI*2);target.fill();
+
+    target.fillStyle="#9b8b73";
+    target.fillRect(x+s*.10,y+s*.39,s*.82,s*.48);
+    target.fillStyle="#685849";
+    target.fillRect(x+s*.14,y+s*.44,s*.08,s*.43);
+    target.fillRect(x+s*.78,y+s*.44,s*.08,s*.43);
+
+    target.fillStyle="#493a31";
+    target.beginPath();
+    target.moveTo(x-s*.03,y+s*.42);
+    target.lineTo(x+s*.50,y+s*.08);
+    target.lineTo(x+s*1.03,y+s*.42);
+    target.lineTo(x+s*.91,y+s*.53);
+    target.lineTo(x+s*.09,y+s*.53);
     target.closePath();target.fill();
-    target.fillStyle="#76523a";
-    target.fillRect(x+s*.44,y+s*.56,s*.16,s*.26);
+
+    target.strokeStyle="rgba(152,112,76,.32)";
+    target.lineWidth=Math.max(1,s*.022);
+    for(let i=0;i<5;i++){
+      const yy=y+s*(.23+i*.055);
+      target.beginPath();target.moveTo(x+s*.14,yy);target.lineTo(x+s*.86,yy+s*.01);target.stroke();
+    }
+
+    target.fillStyle="#554033";
+    target.fillRect(x+s*.42,y+s*.61,s*.18,s*.26);
+    target.fillStyle="#879076";
+    target.fillRect(x+s*.68,y+s*.58,s*.10,s*.10);
   }else if(type==="shrine"){
-    target.fillStyle="#8e4e3d";
-    target.fillRect(x+s*.28,y+s*.32,s*.09,s*.5);
-    target.fillRect(x+s*.63,y+s*.32,s*.09,s*.5);
-    target.fillRect(x+s*.18,y+s*.27,s*.64,s*.09);
-    target.fillRect(x+s*.24,y+s*.18,s*.52,s*.07);
-    target.fillStyle="#503b2f";
-    target.fillRect(x+s*.24,y+s*.82,s*.52,s*.06);
+    target.fillStyle="rgba(37,30,24,.18)";
+    target.beginPath();target.ellipse(x+s*.50,y+s*.80,s*.33,s*.09,0,0,Math.PI*2);target.fill();
+    target.fillStyle="#75463a";
+    target.fillRect(x+s*.26,y+s*.35,s*.09,s*.48);
+    target.fillRect(x+s*.65,y+s*.35,s*.09,s*.48);
+    target.fillRect(x+s*.16,y+s*.30,s*.68,s*.09);
+    target.fillRect(x+s*.23,y+s*.19,s*.54,s*.07);
+    target.fillStyle="#44362e";
+    target.fillRect(x+s*.23,y+s*.82,s*.54,s*.06);
   }
 }
 
@@ -908,10 +1220,7 @@ function buildStaticMapCache(){
 
   for(let y=0;y<MAP_H;y++){
     for(let x=0;x<MAP_W;x++){
-      const type=tileAt(x,y);
-      if(type==="tree"||type==="stone"||type==="flower"||type==="house"||type==="shrine"){
-        drawObject(type,x*s,y*s,s,staticMapCtx);
-      }
+      drawObject(tileAt(x,y),x*s,y*s,s,staticMapCtx);
     }
   }
 }
@@ -938,6 +1247,8 @@ function drawStaticMap(s,view){
   const worldH=view.clampedBottom-view.clampedTop;
   if(worldW<=0||worldH<=0)return;
 
+  ctx.save();
+  ctx.imageSmoothingEnabled=false;
   ctx.drawImage(
     staticMapCanvas,
     view.clampedLeft*sourceTileSize,
@@ -949,6 +1260,7 @@ function drawStaticMap(s,view){
     worldW*s,
     worldH*s
   );
+  ctx.restore();
 }
 
 function updateFogTexture(now,force=false){
